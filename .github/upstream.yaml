@@ -7,3 +7,10 @@ sources:
     branch: https://github.com/ngxson/wllama
     pin: {file: web_build/wllama.json, pattern: '^  "commit":\s*"([0-9a-f]{40})"'}
     lag_days: 7
+  # A backstop: alerts when llama.cpp is a month past our commit, so we hear
+  # of it even if wllama stops following. llama.cpp makes a release for almost
+  # every commit, so an alert on each would fire daily.
+  - name: llama.cpp
+    branch: https://github.com/ggml-org/llama.cpp
+    pin: {file: web_build/wllama.json, pattern: '"llamaCpp":\s*\{[^}]*?"commit":\s*"([0-9a-f]{40})"'}
+    lag_days: 30
