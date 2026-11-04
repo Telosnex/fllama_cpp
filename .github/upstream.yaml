@@ -1,0 +1,9 @@
+# Upstream sources, checked daily by the Upstream watch workflow
+# (telosnex_ci_tools, lib/src/upstream.dart). Set `seen` to skip an update.
+# Native and web use the llama.cpp commit that wllama pins (README), so the
+# update to follow is wllama's. It moves often: alert after a week.
+sources:
+  - name: wllama (and its llama.cpp)
+    branch: https://github.com/ngxson/wllama
+    pin: {file: web_build/wllama.json, pattern: '^  "commit":\s*"([0-9a-f]{40})"'}
+    lag_days: 7
