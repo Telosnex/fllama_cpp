@@ -140,6 +140,17 @@ jobs:
       GPU: 'true'
     steps: *desktop_steps
 
+  desktop-macos-x64:
+    needs: models
+    name: macOS x64
+    runs-on: macos-15-intel
+    timeout-minutes: 60
+    env:
+      TARGET: macos-x64
+      DEVICE: macos
+      GPU: 'false'
+    steps: *desktop_steps
+
   desktop-windows-x64:
     needs: models
     name: Windows x64
