@@ -878,9 +878,8 @@ Future<File?> _findBuiltLibrary(Directory cacheDir, String libFileName) async {
   }
   if (candidates.isEmpty) return null;
   candidates.sort((a, b) {
-    final score = _builtLibraryCandidateScore(
-      a,
-    ).compareTo(_builtLibraryCandidateScore(b));
+    final score = _builtLibraryCandidateScore(a)
+        .compareTo(_builtLibraryCandidateScore(b));
     if (score != 0) return score;
     return a.path.compareTo(b.path);
   });

@@ -370,9 +370,9 @@ final class CudaPackDescriptor {
 
   /// The value of the CMake define FLLAMA_CUDA_PACK_FILES: one
   /// `<name>|<sha256>|<url>` entry per file, separated by `;`.
-  String get cmakeFiles => [
-    for (final file in files) '${file.name}|${file.sha256}|${file.url}',
-  ].join(';');
+  String get cmakeFiles =>
+      [for (final file in files) '${file.name}|${file.sha256}|${file.url}']
+          .join(';');
 }
 
 /// The published CUDA pack that a release build for [target] embeds.
