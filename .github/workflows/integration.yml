@@ -93,6 +93,7 @@ jobs:
             export MODEL_CACHE_DIR="$GITHUB_WORKSPACE/$MODEL_CACHE"
             if [[ "$GPU" != true ]]; then export FLLAMA_TEST_NUM_GPU_LAYERS=0; fi
             run=(flutter test -d "$DEVICE" integration_test/local_llm_integration_test.dart -r expanded)
+            if [[ -n "${PAUSE_THREADS:-}" ]]; then run+=(--dart-define=FLLAMA_TEST_PAUSE_THREADS=$PAUSE_THREADS); fi
             if [[ "$RUNNER_OS" == Linux ]]; then run=(xvfb-run -a "${run[@]}"); fi
             "${run[@]}"
       - name: Crash reports
@@ -149,6 +150,10 @@ jobs:
       TARGET: macos-x64
       DEVICE: macos
       GPU: 'false'
+      # The pause test's decode threads. The default, 3 on 4 CPUs, competes
+      # with the tokenizer on this Intel VM (an 804 ms gap, 2026-11-06), so
+      # 2, as on the macOS ARM64 runners.
+      PAUSE_THREADS: '2'
     steps: *desktop_steps
 
   desktop-windows-x64:
