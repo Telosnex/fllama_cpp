@@ -115,9 +115,10 @@ fllamaChat(request, (response, json, done, error) {
 
 # Licensing
 
-FLLAMA is licensed under the MIT License. See LICENSE, which also has the
-licenses of the code it bundles (llama.cpp, nlohmann_json, and the NVIDIA CUDA
-libraries of the CUDA pack).
+FLLAMA is licensed under the MIT License (LICENSE). NOTICES has that license
+and the licenses of the code it bundles (llama.cpp, nlohmann_json, and the
+NVIDIA CUDA libraries of the CUDA pack). Flutter reads NOTICES in place of
+LICENSE, so an app's license page shows all of them.
 
 # llama.cpp source layout and update process
 
