@@ -89,5 +89,3 @@ src/llama.cpp/.pi/
 src/llama.cpp/.pre-commit-config.yaml
 src/llama.cpp/ggml/.gitignore
 src/llama.cpp/tools/server/tests/.gitignore
-# Flutter license notices, like LICENSE.
-NOTICES
