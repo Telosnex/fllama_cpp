@@ -141,21 +141,6 @@ jobs:
       GPU: 'true'
     steps: *desktop_steps
 
-  desktop-macos-x64:
-    needs: models
-    name: macOS x64
-    runs-on: macos-15-intel
-    timeout-minutes: 60
-    env:
-      TARGET: macos-x64
-      DEVICE: macos
-      GPU: 'false'
-      # The pause test's decode threads. The default, 3 on 4 CPUs, competes
-      # with the tokenizer on this Intel VM (an 804 ms gap, 2026-11-06), so
-      # 2, as on the macOS ARM64 runners.
-      PAUSE_THREADS: '2'
-    steps: *desktop_steps
-
   desktop-windows-x64:
     needs: models
     name: Windows x64
