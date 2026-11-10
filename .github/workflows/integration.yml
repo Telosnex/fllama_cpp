@@ -246,8 +246,11 @@ jobs:
           cat "$root/defaults.json"
       - name: flutter drive
         uses: Telosnex/telosnex_ci_tools/actions/web-driver@f97b50830596a30b24ea34c643a3b7dcce349972 # v0.5.15
-        timeout-minutes: 25
+        # run-minutes stops flutter drive; the step's timeout is only a
+        # backstop. That timeout also cancels the log upload in web-driver.
+        timeout-minutes: 30
         with:
+          run-minutes: 25
           browser: ${{ env.BROWSER }}
           working-directory: example
           artifact-name: web-${{ env.BROWSER }}-${{ env.COMPILER }}
@@ -450,11 +453,14 @@ jobs:
       # web-driver opens Safari once before safaridriver (slow first launch).
       - name: flutter drive
         uses: Telosnex/telosnex_ci_tools/actions/web-driver@f97b50830596a30b24ea34c643a3b7dcce349972 # v0.5.15
-        timeout-minutes: 35
+        # run-minutes stops flutter drive; the step's timeout is only a
+        # backstop. That timeout also cancels the log upload in web-driver.
+        timeout-minutes: 40
         env:
           BROWSER_NAME: ios-safari
           DRIVE_FLAGS: ''
         with:
+          run-minutes: 35
           browser: ios-safari
           working-directory: example
           artifact-name: web-ios-safari-dart2js
@@ -519,11 +525,14 @@ jobs:
       - run: adb reverse tcp:8091 tcp:8091
       - name: flutter drive
         uses: Telosnex/telosnex_ci_tools/actions/web-driver@f97b50830596a30b24ea34c643a3b7dcce349972 # v0.5.15
-        timeout-minutes: 30
+        # run-minutes stops flutter drive; the step's timeout is only a
+        # backstop. That timeout also cancels the log upload in web-driver.
+        timeout-minutes: 35
         env:
           BROWSER_NAME: android-chrome
           DRIVE_FLAGS: --web-port 8091 --no-android-emulator
         with:
+          run-minutes: 30
           browser: android-chrome
           working-directory: example
           artifact-name: web-android-chrome-dart2js
