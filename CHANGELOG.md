@@ -1,3 +1,7 @@
+## 1.0.1
+
+- Web: model files download one at a time. With a model and an mmproj downloading together, Firefox sometimes never finished opening a cache file, and the load waited forever.
+
 ## 1.0.0
 
 - First stable release. Requires kiln 1.0.0, whose source key leaves out the pubspec's `version` and `description`, so a release that changes only those needs no new native build.
