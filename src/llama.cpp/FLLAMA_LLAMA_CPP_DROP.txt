@@ -2,23 +2,19 @@ This vendored llama.cpp tree is upstream llama.cpp at the commit below, copied
 with rsync (docs/ADR_003_LLAMACPP_WLLAMA_PROVENANCE.md, section 6), with the
 patches in patches/llama.cpp applied.
 
-Source commit: 5aeac37a35b44fde4bdffaec9159f2fcb253b622
-Source subject: ggml-cuda: fattn do not check oob if k_VKQ_max = (k_VKQ_max - nbatch_fa) (#30572)
-Source date:   2026-10-18
-Build number:  b11719 (git rev-list --count HEAD)
+Source commit: 7d7f0287530bc8981690f361d8c1627dbae1c99a
+Source subject: mtmd: refactoring: remove clip.h, consolidate code into mtmd (#31865)
+Source date:   2026-11-08
+Build number:  b12211 (git rev-list --count HEAD)
 
 Native and web use this exact upstream commit: it is the llama.cpp pin of
-wllama 3bb2a46 (web_build/wllama.json). tool/kiln/build_web.dart applies
+wllama 6647c1e (web_build/wllama.json). tool/kiln/build_web.dart applies
 patches/llama.cpp to its clone; test/llama_cpp_pin_test.dart checks both.
 
-Native fllama adaptations for this refresh (2026-10-26):
-- the server-context target also builds server-decision.cpp;
-- JSON is common_json (common/json.h), not nlohmann::ordered_json;
-  json_text uses safe_json_to_str;
-- oaicompat_chat_params_parse takes the vocab and a common_chat_session; the
-  task gets it with apply_chat_session (sampling, format, stops, message
-  spans), and the reader with post_tasks (it parses tool calls);
-- a partial result's content is a common_chat_input (.text).
+Native fllama adaptations for this refresh (2026-11-13):
+- the server-context target also builds server-realtime.cpp, which
+  server-context.cpp now calls;
+- patches/llama.cpp/0001 moved from clip.cpp to mtmd-subcontext.cpp (upstream
+  removed clip.h/clip.cpp).
 
-Previous drop: ece963f41 (b10450), wllama 766d28e (3.5.1) plus fllama's
-patch.
+Previous drop: 5aeac37a3 (b11719), wllama 3bb2a46 plus fllama's patch.

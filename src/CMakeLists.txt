@@ -83,7 +83,7 @@ if(NOT DEFINED LLAMA_BUILD_NUMBER OR LLAMA_BUILD_NUMBER STREQUAL "")
   set(LLAMA_BUILD_NUMBER "1")
 endif()
 if(NOT DEFINED LLAMA_BUILD_COMMIT OR LLAMA_BUILD_COMMIT STREQUAL "")
-  set(LLAMA_BUILD_COMMIT "5aeac37a3")
+  set(LLAMA_BUILD_COMMIT "7d7f02875")
 endif()
 
 # ggml-vulkan builds vulkan-shaders-gen as an ExternalProject. Its default
@@ -115,6 +115,7 @@ add_library(server-context STATIC
   ${SERVER_SRC_DIR}/server-common.cpp
   ${SERVER_SRC_DIR}/server-chat.cpp
   ${SERVER_SRC_DIR}/server-context.cpp
+  ${SERVER_SRC_DIR}/server-realtime.cpp
   ${SERVER_SRC_DIR}/server-stream.cpp
   ${SERVER_SRC_DIR}/server-tools.cpp
   ${SERVER_SRC_DIR}/server-mcp.cpp

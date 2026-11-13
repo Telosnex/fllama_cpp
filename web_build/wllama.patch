@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 4248078..44e48c6 100644
+index 559521b..7303907 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -25,10 +25,13 @@ set(WLLAMA_LINK_OPTIONS
@@ -18,7 +18,7 @@ index 4248078..44e48c6 100644
      -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,HEAPU8,MEMFS,FS,mmapAlloc,ENV,wasmMemory
      -sNO_EXIT_RUNTIME=1
      -sIMPORTED_MEMORY=1
-@@ -56,7 +59,7 @@ if (WLLAMA_COMPAT)
+@@ -59,7 +62,7 @@ if (WLLAMA_COMPAT)
      list(APPEND WLLAMA_LINK_OPTIONS
          -fexceptions
          -sASYNCIFY=1
@@ -27,7 +27,7 @@ index 4248078..44e48c6 100644
      )
  else()
      list(APPEND WLLAMA_COMPILE_OPTIONS
-@@ -67,7 +70,7 @@ else()
+@@ -71,7 +74,7 @@ else()
          -sMEMORY64=1
          -fwasm-exceptions
          -sJSPI
@@ -37,11 +37,11 @@ index 4248078..44e48c6 100644
  endif()
  
 diff --git a/cpp/wllama-context.h b/cpp/wllama-context.h
-index cae07f6..6b48c70 100644
+index 820c27c..312e6e4 100644
 --- a/cpp/wllama-context.h
 +++ b/cpp/wllama-context.h
-@@ -299,10 +299,46 @@ struct wllama_context
-     if (is_chat)
+@@ -603,10 +603,46 @@ struct wllama_context
+     if (is_chat || is_asr)
      {
        std::vector<raw_buffer> dummy_files; // unused
 +      // fllama: a chat request can carry its own Jinja template
@@ -89,7 +89,7 @@ index cae07f6..6b48c70 100644
            chat_session);
        body = std::move(body_parsed);
 diff --git a/cpp/wllama.cpp b/cpp/wllama.cpp
-index b499be1..30f6697 100644
+index 57fced5..0e43124 100644
 --- a/cpp/wllama.cpp
 +++ b/cpp/wllama.cpp
 @@ -24,7 +24,7 @@
@@ -113,7 +113,7 @@ index b499be1..30f6697 100644
  
  static std::vector<char> input_buffer;
  // second argument is dummy
-@@ -136,6 +139,23 @@ extern "C" const char *wllama_action(const char *name, const char *req_raw)
+@@ -140,6 +143,23 @@ extern "C" const char *wllama_action(const char *name, const char *req_raw)
    }
  }
  
@@ -164,10 +164,10 @@ index fe45ec4..258a7b1 100644
  
  /**
 diff --git a/src/wllama.ts b/src/wllama.ts
-index 6ecbb68..ab396b0 100644
+index a6b099e..6a2fea7 100644
 --- a/src/wllama.ts
 +++ b/src/wllama.ts
-@@ -480,7 +480,11 @@ export class Wllama {
+@@ -636,7 +636,11 @@ export class Wllama {
      }
  
      if (this.proxy) {
@@ -180,9 +180,9 @@ index 6ecbb68..ab396b0 100644
      }
      // detect if we can use multi-thread and webgpu
      const supportMultiThread = await isSupportMultiThread();
-@@ -518,17 +522,65 @@ export class Wllama {
-       );
+@@ -675,17 +679,65 @@ export class Wllama {
      }
+     await this.checkWasmVersion(startResult.version);
  
 +    this.loadedModelFiles = modelFiles;
 +    this.loadedCompat = workerResources.compat;
@@ -248,7 +248,7 @@ index 6ecbb68..ab396b0 100644
        n_ctx_auto: false, // not supported for now
        mmproj_path: modelFiles.mmproj
          ? `/models/${MMPROJ_FILE_NAME}`
-@@ -918,6 +970,7 @@ export class Wllama {
+@@ -1190,6 +1242,7 @@ export class Wllama {
    async exit(): Promise<void> {
      await this.proxy?.wllamaExit();
      this.proxy = null as any;
@@ -257,10 +257,10 @@ index 6ecbb68..ab396b0 100644
  
    /**
 diff --git a/src/worker.ts b/src/worker.ts
-index 3cdc7c9..e0c1c5a 100644
+index a8ffbb9..26b6893 100644
 --- a/src/worker.ts
 +++ b/src/worker.ts
-@@ -44,6 +44,7 @@ interface TaskParam {
+@@ -43,6 +43,7 @@ interface TaskParam {
      | 'wllama.start'
      | 'wllama.action'
      | 'wllama.exit'
@@ -303,24 +303,24 @@ index 3cdc7c9..e0c1c5a 100644
    async wllamaExit(): Promise<void> {
      if (this.worker) {
        // we don't actually need to send exit
-@@ -390,13 +419,15 @@ export class ProxyToWorker {
+@@ -397,13 +426,15 @@ export class ProxyToWorker {
+         this.logger.error(originalErr);
        }
-       (async () => {
-         let stack = '';
--        let newMsg = message.replace(
-+        // fllama: Emscripten passes an Error, not a string, when the wasm does
-+        // not compile. Without String(), this throws and no task is rejected.
-+        let newMsg = String(message ?? '').replace(
-           'Build with -sASSERTIONS for more info.',
-           ''
-         );
-         if (signalType === 'abort') {
-           newMsg = `(ABORT) ${newMsg}`;
--          stack = rawStack.replace(/\|/g, '\n');
-+          stack = String(rawStack ?? '').replace(/\|/g, '\n');
-         } else if (signalType === 'exception') {
-           stack = rawStack;
-         }
+       let stack = '';
+-      let newMsg = message.replace(
++      // fllama: Emscripten passes an Error, not a string, when the wasm does
++      // not compile. Without String(), this throws and no task is rejected.
++      let newMsg = String(message ?? '').replace(
+         'Build with -sASSERTIONS for more info.',
+         ''
+       );
+       if (signalType === 'abort') {
+         newMsg = `(ABORT) ${newMsg}`;
+-        stack = rawStack.replace(/\|/g, '\n');
++        stack = String(rawStack ?? '').replace(/\|/g, '\n');
+       } else if (signalType === 'exception') {
+         stack = rawStack;
+       }
 diff --git a/src/workers-code/llama-cpp.js b/src/workers-code/llama-cpp.js
 index d0792b5..60a3fe2 100644
 --- a/src/workers-code/llama-cpp.js

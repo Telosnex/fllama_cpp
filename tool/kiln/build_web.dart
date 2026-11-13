@@ -38,16 +38,16 @@ const _outputs = {
 
 Future<void> main(List<String> args) async {
   final options = _parse(args);
-  final root = Directory.fromUri(
-    Platform.script.resolve('../..'),
-  ).absolute.path;
+  final root = Directory.fromUri(Platform.script.resolve('../..'))
+      .absolute
+      .path;
   final out = Directory(options['out']!).absolute;
   final work = Directory(
     options['work'] ?? '${Directory.systemTemp.path}/fllama_web_build',
   ).absolute;
-  final pin =
-      jsonDecode(await File('$root/web_build/wllama.json').readAsString())
-          as Map<String, dynamic>;
+  final pin = jsonDecode(
+    await File('$root/web_build/wllama.json').readAsString(),
+  ) as Map<String, dynamic>;
   final llama = pin['llamaCpp'] as Map<String, dynamic>;
   final dawn = pin['dawn'] as Map<String, dynamic>;
 
@@ -60,9 +60,8 @@ Future<void> main(List<String> args) async {
   final node = (await _output(['node', '--version'], root)).trim();
   if (node != 'v${pin['node']}') _fail('Node ${pin['node']} required: $node');
   if (options['toolchain-file'] case final path?) {
-    final version = RegExp(
-      r'[0-9][0-9.]* \([0-9a-f]+\)',
-    ).firstMatch(emcc.split('\n').first)?[0];
+    final version = RegExp(r'[0-9][0-9.]* \([0-9a-f]+\)')
+        .firstMatch(emcc.split('\n').first)?[0];
     await File(path).writeAsString(
       'Emscripten ${version ?? pin['emscripten']}, Node ${pin['node']}\n',
     );
@@ -199,22 +198,27 @@ Future<void> main(List<String> args) async {
       '-j${Platform.numberOfProcessors}',
     ], build);
     await Directory('$wllama/$wasmDir').create(recursive: true);
-    for (final name in ['wllama.js', 'wllama.wasm']) {
-      await File('$build/$name').copy('$wllama/$wasmDir/$name');
-    }
+    await File('$build/wllama.js').copy('$wllama/$wasmDir/wllama.js');
+    // Copies the wasm and adds a name section: function names in stack
+    // traces.
+    await _run([
+      'node',
+      'scripts/add_wasm_names.js',
+      '$dir/wllama.wasm',
+      '$wasmDir/wllama.wasm',
+    ], wllama);
   }
-  // Reads build/ and build-compat/: function names for both stack traces.
-  await _run(['node', 'scripts/build_source_map.js'], wllama);
   await _run(['npm', 'run', 'build:glue'], wllama);
 
   await _run(['npm', 'ci', '--no-audit', '--no-fund'], wllama);
   await _run(['npm', 'run', 'build:worker'], wllama);
-  final generated = await File(
-    '$wllama/src/workers-code/generated.ts',
-  ).readAsString();
+  final generated = await File('$wllama/src/workers-code/generated.ts')
+      .readAsString();
   if (!generated.contains("LIBLLAMA_VERSION = '${llama['version']}'")) {
     _fail('LIBLLAMA_VERSION is not ${llama['version']}');
   }
+  // Both wasm files carry the version that generated.ts expects.
+  await _run(['node', 'scripts/check_wasm_version.js'], wllama);
   await _run(['npx', 'tsc', '--noEmit', '-p', 'tsconfig.build.json'], wllama);
   await _run(['npm', 'run', 'build:tsup'], wllama);
 

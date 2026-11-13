@@ -5,19 +5,18 @@ Without it, an mmproj load without memory for its compute buffer reports
 success, and every image request aborts (GGML_ASSERT(buffer)). fllama hit
 this on iOS Safari. Drop this patch when llama.cpp has the PR.
 ---
-diff --git a/tools/mtmd/clip.cpp b/tools/mtmd/clip.cpp
-index 1783c7ddfd6f..e92c55cd7d7d 100644
---- a/tools/mtmd/clip.cpp
-+++ b/tools/mtmd/clip.cpp
-@@ -3762,7 +3762,10 @@ struct clip_model_loader {
-     // only initialize backend buffers, but do not allocate them yet
-     static support_info_graph reserve_compute_meta(clip_ctx & ctx_clip, const clip_image_f32_batch & batch) {
-         ggml_cgraph * gf = clip_get_graph_builder(&ctx_clip, batch)->build();
--        ggml_backend_sched_reserve(ctx_clip.sched.get(), gf);
-+        if (!ggml_backend_sched_reserve(ctx_clip.sched.get(), gf)) {
-+            throw std::runtime_error(string_format(
-+                "%s: failed to reserve compute buffers - not enough free memory on the backend\n", __func__));
-+        }
+diff --git a/tools/mtmd/mtmd-subcontext.cpp b/tools/mtmd/mtmd-subcontext.cpp
+--- a/tools/mtmd/mtmd-subcontext.cpp
++++ b/tools/mtmd/mtmd-subcontext.cpp
+@@ -229,7 +229,10 @@
  
-         ctx_clip.mem_compute.clear();
-         for (size_t i = 0; i < ctx_clip.backend_ptrs.size(); ++i) {
+ mtmd_subcontext::support_info_graph mtmd_subcontext::reserve_compute_meta(const mtmd_image_f32_batch & batch) {
+     ggml_cgraph * gf = mtmd_get_graph_builder(this, batch)->build();
+-    ggml_backend_sched_reserve(sched.get(), gf);
++    if (!ggml_backend_sched_reserve(sched.get(), gf)) {
++        throw std::runtime_error(string_format(
++            "%s: failed to reserve compute buffers - not enough free memory on the backend\n", __func__));
++    }
+ 
+     mem_compute.clear();
+     for (size_t i = 0; i < backend_ptrs.size(); ++i) {
