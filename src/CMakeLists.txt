@@ -50,8 +50,11 @@ if(ANDROID)
     set(GGML_LLAMAFILE OFF CACHE BOOL "Disable llamafile for Android" FORCE)
     set(GGML_OPENMP OFF CACHE BOOL "Disable OpenMP for Android" FORCE)
     # Support Android 15 16 KB pages in every library: fllama, and on arm64
-    # the ggml libraries too.
+    # the ggml libraries too. The ggml CPU variants are MODULE libraries
+    # (GGML_BACKEND_DL), which take CMAKE_MODULE_LINKER_FLAGS; NDK r27 links
+    # them 4 KB aligned without it.
     string(APPEND CMAKE_SHARED_LINKER_FLAGS " -Wl,-z,max-page-size=16384")
+    string(APPEND CMAKE_MODULE_LINKER_FLAGS " -Wl,-z,max-page-size=16384")
 
     # No global CPU architecture. On arm64, hook/build.dart builds ggml's
     # Android CPU variants (GGML_CPU_ALL_VARIANTS), and fllama loads the best
