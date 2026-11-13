@@ -1,3 +1,8 @@
+## 1.0.2
+
+- llama.cpp b12211 (was b11719) and wllama 6647c1e (was 3bb2a46). On an M4 Max with Qwen 3.5 0.8B: web generation about 7% faster in Chrome, native CPU prompt processing about 11% faster; Metal unchanged.
+- Android: the ggml CPU variant libraries are linked for 16 KB pages, like the other libraries, also when they are built from source.
+
 ## 1.0.1
 
 - Web: model files download one at a time. With a model and an mmproj downloading together, Firefox sometimes never finished opening a cache file, and the load waited forever.

@@ -22,13 +22,13 @@ fllama runs the same llama.cpp source two ways:
 Both use upstream llama.cpp
 
 ```text
-5aeac37a35b44fde4bdffaec9159f2fcb253b622  (2026-10-18, b11719)
-ggml-cuda: fattn do not check oob if k_VKQ_max = (k_VKQ_max - nbatch_fa) (#30572)
+7d7f0287530bc8981690f361d8c1627dbae1c99a  (2026-11-08, b12211)
+mtmd: refactoring: remove clip.h, consolidate code into mtmd (#31865)
 ```
 
 with the patches in `patches/llama.cpp`. It is the llama.cpp pin of wllama
-`3bb2a46`, so wllama has been built and run with it upstream. The web bundle
-names itself `b11719-5aeac37`.
+`6647c1e`, so wllama has been built and run with it upstream. The web bundle
+names itself `b12211-7d7f028`.
 
 ---
 
@@ -37,8 +37,8 @@ names itself `b11719-5aeac37`.
 ### 2a. wllama
 
 ```text
-ngxson/wllama 3bb2a46f0dab0b924e8cd992b85e8881c3d3a859 (2026-10-20)
-sync latest llama.cpp (#293)
+ngxson/wllama 6647c1ea3837b2f0205a300c3bf5ff644aaa06bf (2026-11-08)
+npm stage publish (#318)
 ```
 
 plus `web_build/wllama.patch`, the reproducible source of every fllama change
@@ -48,8 +48,8 @@ to wllama. The patch does not move the llama.cpp gitlink.
 
 ```text
 upstream: https://github.com/ggml-org/llama.cpp
-commit:   5aeac37a35b44fde4bdffaec9159f2fcb253b622
-build:    b11719 (git rev-list --count)
+commit:   7d7f0287530bc8981690f361d8c1627dbae1c99a
+build:    b12211 (git rev-list --count)
 ```
 
 `src/llama.cpp` is an exact copy of that commit, with the patches in
@@ -58,10 +58,11 @@ build:    b11719 (git rev-list --count)
 patch files to its llama.cpp clone. `test/llama_cpp_pin_test.dart` checks
 that native and web pin one commit and that every patch is applied.
 
-Patches (2026-10-26):
+Patches (2026-11-13):
 
-- `0001-mtmd-check-sched-reserve.patch`: llama.cpp PR 29150 (open). Without
-  it, an mmproj load without memory for its compute buffer reports success
+- `0001-mtmd-check-sched-reserve.patch`: llama.cpp PR 29150 (open). Since
+  b12211 it patches `tools/mtmd/mtmd-subcontext.cpp` (upstream removed
+  `clip.cpp`). Without it, an mmproj load without memory for its compute buffer reports success
   and every image request aborts. Drop it when llama.cpp has the PR.
 
 ### 2c. Artifact fingerprints
@@ -109,11 +110,12 @@ Toolchain (wllama's pins, unchanged): Emscripten SDK 4.0.20, Dawn
 
 ## 4. fllama native adaptations
 
-fllama's own C++ (`src/fllama.cpp`, `src/CMakeLists.txt`) for `5aeac37`:
+fllama's own C++ (`src/fllama.cpp`, `src/CMakeLists.txt`) for `7d7f028`:
 
 - the `server-context` target builds `server-task`, `-queue`, `-common`,
-  `-chat`, `-context`, `-stream`, `-tools`, `-mcp`, `-schema` and
-  `-decision`; it cannot use `tools/server`'s CMake (the `llama-server`
+  `-chat`, `-context`, `-realtime`, `-stream`, `-tools`, `-mcp`,
+  `-schema` and `-decision` (`server-context` calls the realtime slots,
+  which fllama never opens); it cannot use `tools/server`'s CMake (the `llama-server`
   executable needs cpp-httplib);
 - JSON is `common_json` (`common/json.h`); `json_text` uses
   `safe_json_to_str`;

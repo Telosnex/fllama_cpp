@@ -3,7 +3,7 @@ description: >-
   Run LLMs locally in Flutter with llama.cpp: chat, tool calls, images and
   structured output on Android, iOS, macOS, Linux, Windows, and the web
   (WebGPU).
-version: 1.0.1
+version: 1.0.2
 repository: https://github.com/Telosnex/fllama_cpp
 issue_tracker: https://github.com/Telosnex/fllama_cpp/issues
 
