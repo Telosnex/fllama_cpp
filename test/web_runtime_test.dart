@@ -197,12 +197,16 @@ void main() {
 
   // ADR 002 D7, I3.
   test('the runtime files load with the webVersion query', () async {
-    await loadFllamaWebRuntime();
+    // v4 compiles the packed Wasm on the page, before sending it to the worker.
+    expect(await _chat(model, numGpuLayers: 0), isNull);
     final loaded = [
       for (final entry in _resourceEntries().toDart)
         Uri.parse((entry as _Entry).name),
     ].where((u) => u.path.contains('/packages/fllama_cpp/web/'));
-    expect(loaded.map((u) => u.path.split('/web/').last).toSet(), {
+    final files = loaded.map((u) => u.path.split('/web/').last).toSet();
+    const packedWasm = {'wllama/wasm/wllama.wasm', 'wllama/compat/wllama.wasm'};
+    expect(files.intersection(packedWasm), isNotEmpty);
+    expect(files.difference(packedWasm), {
       'fllama_web_init.js',
       'wllama/index.js',
     });
