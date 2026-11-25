@@ -211,12 +211,14 @@ fllama has two llama.cpp delivery paths:
   ```text
   src/llama.cpp
   ```
-- **Web** uses wllama (`wllama/index.js`, `wllama/wasm/wllama.{js,wasm}`, and
-  `wllama/compat/wllama.{js,wasm}` for browsers without Memory64 or JSPI, such
-  as Safari).
+- **Web** uses wllama (`wllama/index.js`, `wllama/wasm/wllama.wasm`, and
+  `wllama/compat/wllama.wasm` for browsers without JSPI or relaxed SIMD).
+  Both Wasm files include their JavaScript glue.
   The release workflow builds it with `tool/kiln/build_web.dart` from wllama and
   llama.cpp at the commits of `web_build/wllama.json`, with
   `web_build/wllama.patch`. `native_artifacts/web.json` pins the files.
+  Models with more than 4 GiB of CPU-resident weights need cross-origin
+  isolation and more than one inference thread.
 
 To keep native and web matched, the llama.cpp commit of `web_build/wllama.json`
 is the commit of `src/llama.cpp`.
@@ -232,7 +234,7 @@ git status --short
 
 # Dry run first. Review every changed/deleted file.
 rsync -nrc --delete \
-  --exclude='.git/' \
+  --exclude='.git' \
   --exclude='build/' \
   --exclude='FLLAMA_LLAMA_CPP_DROP.txt' \
   "$WLLAMA/llama.cpp/" \
@@ -240,7 +242,7 @@ rsync -nrc --delete \
 
 # If the dry run is sane, do the copy.
 rsync -a --delete \
-  --exclude='.git/' \
+  --exclude='.git' \
   --exclude='build/' \
   --exclude='FLLAMA_LLAMA_CPP_DROP.txt' \
   "$WLLAMA/llama.cpp/" \

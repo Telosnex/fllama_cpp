@@ -119,10 +119,7 @@ const _cudaPackHeaders = {
 /// Loader source files that ggml-cuda does not build or link. The CUDA
 /// backend now includes ggml-backend-dl.h for its registration macros, so
 /// that header stays in the key.
-const _cudaPackLoaderSources = {
-  'ggml-backend-dl.cpp',
-  'ggml-backend-reg.cpp',
-};
+const _cudaPackLoaderSources = {'ggml-backend-dl.cpp', 'ggml-backend-reg.cpp'};
 
 /// Files in other ggml/src directories that ggml-base includes:
 /// ggml-quants.c includes ggml-cpu/ggml-cpu-impl.h.

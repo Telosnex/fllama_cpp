@@ -36,12 +36,12 @@ require_grep() {
 # `dart run kiln:web install-dev`.
 require_file lib/web/fllama_web_init.js
 require_file lib/web/wllama/index.js
-require_file lib/web/wllama/wasm/wllama.js
 require_file lib/web/wllama/wasm/wllama.wasm
-require_file lib/web/wllama/compat/wllama.js
 require_file lib/web/wllama/compat/wllama.wasm
 require_file native_artifacts/web.json
 
+require_absent lib/web/wllama/wasm/wllama.js
+require_absent lib/web/wllama/compat/wllama.js
 require_absent assets/web
 require_absent example/web/fllama_web_init.js
 require_absent example/web/wllama
@@ -55,6 +55,9 @@ compat_wasm="lib/web/wllama/compat/wllama.wasm"
 [[ "$(strings "$compat_wasm" | grep -cE 'server_context|chat_completion' || true)" != "0" ]] || fail "$compat_wasm is missing server/chat markers"
 
 wasm="lib/web/wllama/wasm/wllama.wasm"
+for binary in "$wasm" "$compat_wasm"; do
+  [[ "$(count_markers "$binary" 'wllama_js')" != "0" ]] || fail "$binary is missing embedded worker glue"
+done
 old_markers="$(count_markers "$wasm" 'WaitAny returned|Failed to submit commands')"
 fast_markers="$(count_markers "$wasm" 'ggml_webgpu_flash_attn_decisions|parameter arena exhausted|event_synchronize timed out')"
 server_markers="$(count_markers "$wasm" 'server_context|server_task|chat_completion|cmpl_req')"

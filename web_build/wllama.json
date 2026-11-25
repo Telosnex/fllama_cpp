@@ -1,11 +1,11 @@
 {
   "repository": "https://github.com/ngxson/wllama.git",
-  "commit": "6647c1ea3837b2f0205a300c3bf5ff644aaa06bf",
+  "commit": "c87585843be05973f1fd82b53d28659c45e1c41a",
   "patch": "web_build/wllama.patch",
   "llamaCpp": {
     "repository": "https://github.com/ggml-org/llama.cpp.git",
-    "commit": "7d7f0287530bc8981690f361d8c1627dbae1c99a",
-    "version": "b12211-7d7f028"
+    "commit": "0b51bb2fed322bc884f96f98db340e2b0f6ea176",
+    "version": "b12637-0b51bb2"
   },
   "dawn": {
     "url": "https://github.com/google/dawn/releases/download/v20260317.182325/emdawnwebgpu_pkg-v20260317.182325.zip",
@@ -13,5 +13,11 @@
   },
   "emsdkImage": "emscripten/emsdk@sha256:460fff8f8ac87e11b16447fbd66538a686eafa0e4fb977aa0989ed19fe2079f7",
   "emscripten": "4.0.20",
-  "node": "22.16.0"
+  "node": "22.16.0",
+  "binaryen": {
+    "repository": "https://github.com/WebAssembly/binaryen.git",
+    "commit": "6d5fed324a603d7f8c9f1800a03043fb62abc7d2",
+    "patch": "scripts/binaryen-asyncify-try.patch",
+    "patchSha256": "8291a63b5f05681192407c946a9cada055ee0bc9b4beaf16eefa8935ba303bb2"
+  }
 }

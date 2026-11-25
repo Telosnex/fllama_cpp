@@ -1,18 +1,25 @@
 # Runbook: Rebuilding the fllama Web Runtime
 
-The web runtime is wllama: `wllama/index.js`, `wllama/wasm/wllama.js` and
-`wllama/wasm/wllama.wasm`, and the compat build `wllama/compat/wllama.js` and
-`wllama/compat/wllama.wasm`. The compat build has no Memory64 or JSPI. wllama
-loads it when the browser does not have them (Safari), but never on Firefox,
-which runs the default build on the CPU. GitHub Actions builds it in the native release
-workflow (kiln ADR 002). No developer machine makes a released
-file.
+The web runtime is wllama v4: `wllama/index.js`, `wllama/wasm/wllama.wasm`
+(main), and `wllama/compat/wllama.wasm` (compat). Both builds use wasm32 and
+embed the worker JavaScript in the Wasm. The main build uses JSPI and relaxed
+SIMD; the compat build uses Asyncify and is used when either feature is
+missing (e.g. Safari). Firefox with relaxed SIMD can use the main build on
+CPU without JSPI. GitHub Actions builds the released files in the native
+release workflow (kiln ADR 002).
+
+Each Wasm instance is limited to 4 GiB of memory. With cross-origin isolation
+(COOP/COEP), more than one thread, and async file reads (JSPI or compat),
+wllama can spread model weights across RPC workers. Unsupported modes report
+a load error when a model does not fit in a single instance. The browser's
+available memory and GPU limits can still prevent large models from loading.
 
 ## Source of truth
 
 - `web_build/wllama.json`: the wllama and llama.cpp commits, the Dawn WebGPU
   package and its SHA-256, the emsdk image digest (Emscripten 4.0.20), and
-  Node 22.16.0.
+  Node 22.16.0. The Binaryen commit and patch checksum pin the `wasm-opt`
+  rebuilt for Asyncify with Wasm exceptions; only compat uses it.
 - `web_build/wllama.patch`: all fllama changes to wllama (ADR 003 §3).
 - `tool/kiln/build_web.dart`: the build. It runs the steps of wllama's
   `build:wasm` (the default and the compat build), `build:worker` and
@@ -68,5 +75,6 @@ See `dev/web_smoke/README.md`. `--browser=webkit` runs Safari's engine, and
 ## Common pitfalls
 
 - Do not add runtime files to `example/web/` or a script tag to `index.html`; the build hook installs the files, and Dart loads the bridge.
-- Do not use legacy JSPI/Asyncify path keys in `fllama_web_init.js`; upstream wllama v3 expects `{ default: '<wasm-url>' }`.
+- Do not ship separate worker JS files. The constructor takes `{ default: '<wasm-url>' }` and `setCompat()` takes `{ wasm: '<compat-wasm-url>' }`.
+- After changing sources, test with `web_build: local` until the release workflow produces updated manifests. Do not stamp old release bytes as a new runtime.
 - Do not assume browser requests can run concurrently; the fllama JS bridge serializes them until batching is validated.
