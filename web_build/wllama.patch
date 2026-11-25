@@ -135,7 +135,7 @@ index 0474154..02f6657 100644
  {
    try
 diff --git a/src/wllama.ts b/src/wllama.ts
-index 459caa2..7f6cec3 100644
+index 459caa2..0d6af0f 100644
 --- a/src/wllama.ts
 +++ b/src/wllama.ts
 @@ -351,6 +351,8 @@ export class WllamaRealtimeSession {
@@ -215,7 +215,7 @@ index 459caa2..7f6cec3 100644
 -        ownRpcWorkers
 -      );
 -      await proxy.moduleInit(modelFiles.all, rpc);
-+      this.metadata = undefined;
++      delete this.metadata;
 +      this.loadedContextInfo = null as any;
 +      if (oldProxy) {
 +        await proxy.wllamaUnload();
@@ -257,7 +257,7 @@ index 459caa2..7f6cec3 100644
      const proxy = this.proxy;
      const rpcWorkers = this.rpcWorkers;
      this.proxy = null as any;
-+    this.metadata = undefined;
++    delete this.metadata;
 +    this.loadedContextInfo = null as any;
      this.rpcWorkers = [];
      await proxy?.wllamaExit();
