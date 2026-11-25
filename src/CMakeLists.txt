@@ -83,10 +83,10 @@ if(NOT DEFINED LLAMA_INSTALL_VERSION OR LLAMA_INSTALL_VERSION STREQUAL "")
   set(LLAMA_INSTALL_VERSION "0.0.0")
 endif()
 if(NOT DEFINED LLAMA_BUILD_NUMBER OR LLAMA_BUILD_NUMBER STREQUAL "")
-  set(LLAMA_BUILD_NUMBER "1")
+  set(LLAMA_BUILD_NUMBER "12637")
 endif()
 if(NOT DEFINED LLAMA_BUILD_COMMIT OR LLAMA_BUILD_COMMIT STREQUAL "")
-  set(LLAMA_BUILD_COMMIT "7d7f02875")
+  set(LLAMA_BUILD_COMMIT "0b51bb2fe")
 endif()
 
 # ggml-vulkan builds vulkan-shaders-gen as an ExternalProject. Its default
@@ -118,6 +118,7 @@ add_library(server-context STATIC
   ${SERVER_SRC_DIR}/server-common.cpp
   ${SERVER_SRC_DIR}/server-chat.cpp
   ${SERVER_SRC_DIR}/server-context.cpp
+  ${SERVER_SRC_DIR}/server-slot-sched.cpp
   ${SERVER_SRC_DIR}/server-realtime.cpp
   ${SERVER_SRC_DIR}/server-stream.cpp
   ${SERVER_SRC_DIR}/server-tools.cpp
@@ -136,7 +137,12 @@ target_compile_features(server-context PRIVATE cxx_std_17)
 if (BUILD_SHARED_LIBS)
   set_target_properties(server-context PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
-target_link_libraries(server-context PUBLIC llama-common mtmd ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(server-context PUBLIC llama-common mtmd ${CMAKE_THREAD_LIBS_INIT}
+                                     PRIVATE vendor::hash)
+if(WIN32)
+  # server-common uses inet_pton, but fllama does not link cpp-httplib.
+  target_link_libraries(server-context PRIVATE ws2_32)
+endif()
 
 # GPU packs (docs/ADR_004_DESKTOP_GPU_BACKENDS.md, D13): backend libraries
 # that the app downloads instead of bundling. fllama contains the SHA-256 and

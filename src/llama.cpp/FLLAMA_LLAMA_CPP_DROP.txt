@@ -1,20 +1,19 @@
 This vendored llama.cpp tree is upstream llama.cpp at the commit below, copied
-with rsync (docs/ADR_003_LLAMACPP_WLLAMA_PROVENANCE.md, section 6), with the
+with rsync (doc/ADR_003_LLAMACPP_WLLAMA_PROVENANCE.md, section 6), with the
 patches in patches/llama.cpp applied.
 
-Source commit: 7d7f0287530bc8981690f361d8c1627dbae1c99a
-Source subject: mtmd: refactoring: remove clip.h, consolidate code into mtmd (#31865)
-Source date:   2026-11-08
-Build number:  b12211 (git rev-list --count HEAD)
+Source commit: 0b51bb2fed322bc884f96f98db340e2b0f6ea176
+Source subject: server: support /models/sse on single-model mode (#32398)
+Source date:   2026-11-22
+Build number:  b12637 (git rev-list --count HEAD)
 
 Native and web use this exact upstream commit: it is the llama.cpp pin of
-wllama 6647c1e (web_build/wllama.json). tool/kiln/build_web.dart applies
+wllama c875858 (web_build/wllama.json). tool/kiln/build_web.dart applies
 patches/llama.cpp to its clone; test/llama_cpp_pin_test.dart checks both.
 
-Native fllama adaptations for this refresh (2026-11-13):
-- the server-context target also builds server-realtime.cpp, which
-  server-context.cpp now calls;
-- patches/llama.cpp/0001 moved from clip.cpp to mtmd-subcontext.cpp (upstream
-  removed clip.h/clip.cpp).
+The three local fixes are still needed. The mtmd patch now uses the shared
+backend scheduler and mtmd_format. The realtime and Metal patches still
+apply: realtime returns an error on context overflow, and Metal keeps its
+devices alive until the process exits.
 
-Previous drop: 5aeac37a3 (b11719), wllama 3bb2a46 plus fllama's patch.
+Previous drop: 7d7f02875 (b12211), wllama 6647c1e with fllama patches.
