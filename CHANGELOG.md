@@ -1,3 +1,7 @@
+## 1.3.1
+
+- Fixes the native file check of 1.3.0 in an app (`dart run kiln:check` and release checks reported that the sources did not match the manifest). The published package did not have one llama.cpp script that the source key included. The libraries have no code change.
+
 ## 1.3.0
 
 - The web runtime supports decisions with `fllamaDecide` and realtime audio with `fllamaRealtimeOpen`.
