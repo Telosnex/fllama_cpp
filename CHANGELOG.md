@@ -1,4 +1,4 @@
-## Unreleased
+## 1.3.0
 
 - The web runtime supports decisions with `fllamaDecide` and realtime audio with `fllamaRealtimeOpen`.
 - Update llama.cpp to b12637 and wllama to 4.0.0 (`c875858`). Native and web still use the same llama.cpp commit.
