@@ -42,17 +42,8 @@ const _voxtralDir = String.fromEnvironment('FLLAMA_VOXTRAL_DIR');
 const _closed = fllama.FllamaRealtimeSession.closedEventType;
 
 void main() {
-  if (kIsWeb) {
-    test('fllamaRealtimeOpen is native only', () {
-      expect(
-        () => fllama.fllamaRealtimeOpen(
-          const fllama.FllamaRealtimeRequest(modelPath: 'm', mmprojPath: 'p'),
-        ),
-        throwsUnsupportedError,
-      );
-    });
-    return;
-  }
+  // This suite reads models and media from local file paths.
+  if (kIsWeb) return;
 
   _voxtralTests();
 

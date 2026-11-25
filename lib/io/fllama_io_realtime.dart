@@ -16,7 +16,6 @@ typedef _NativeLog = Void Function(Pointer<Char> message);
 ///
 /// Returns at once. The model loads in the background; the session starts
 /// with `session.created`. Events that are sent before it wait for it.
-/// Native platforms only.
 FllamaRealtimeSession fllamaRealtimeOpen(FllamaRealtimeRequest request) {
   if (request.modelPath.isEmpty) {
     throw ArgumentError.value(request.modelPath, 'modelPath', 'is empty');

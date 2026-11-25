@@ -59,6 +59,12 @@ flutter test --platform chrome test/web_runtime_test.dart
 The image needs Dart on the PATH. Without `--from`, `install-dev` downloads
 the released files.
 
+## Decide and realtime bridge tests
+
+Run `node --test dev/web_smoke/web_api.test.mjs` to check the JS bridge
+without model files. The Chrome runtime test also checks the Dart API
+with the small test model.
+
 ## Smoke test with a real model
 
 ```bash

@@ -1,5 +1,6 @@
 ## Unreleased
 
+- The web runtime supports decisions with `fllamaDecide` and realtime audio with `fllamaRealtimeOpen`.
 - Update llama.cpp to b12637 and wllama to 4.0.0 (`c875858`). Native and web still use the same llama.cpp commit.
 - For LFM3 D1, llama.cpp batches questions that share a state, including an image. The Decision API response format stays the same. Scores and input token counts can change.
 - On web, both builds use 32-bit Wasm. Models with more than 4 GiB of CPU-resident weights need cross-origin isolation and multiple inference threads. The compat build supports browsers without JSPI or relaxed SIMD.

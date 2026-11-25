@@ -35,12 +35,32 @@ index 4fbef69..4063017 100644
 +        -sJSPI_EXPORTS=['wllama_start','wllama_action','wllama_rpc_serve','wllama_unload']
      )
  endif()
-
+ 
+diff --git a/cpp/glue.hpp b/cpp/glue.hpp
+index 1c0b84a..96c50e7 100644
+--- a/cpp/glue.hpp
++++ b/cpp/glue.hpp
+@@ -670,6 +670,7 @@ struct glue_msg_systemone_res
+ {
+   GLUE_HANDLER("sys1_res")
+   GLUE_FIELD(bool, success)
++  GLUE_FIELD(str, error_json)
+   GLUE_FIELD(int, req_id)
+ };
+ 
 diff --git a/cpp/wllama-context.h b/cpp/wllama-context.h
-index d742491..d8ec549 100644
+index d742491..429b38f 100644
 --- a/cpp/wllama-context.h
 +++ b/cpp/wllama-context.h
-@@ -634,10 +634,46 @@ struct wllama_context
+@@ -593,6 +593,7 @@ struct wllama_context
+     std::vector<std::vector<float>> scores; // indexed by task index
+     int32_t n_tokens = 0;
+     bool is_packed = false; // one task holds the scores of several questions
++    bool has_media = false;
+   };
+   std::unordered_map<int, decision_request> decision_reqs; // keyed by req_id
+   std::unordered_map<int, std::vector<json>> embedding_reqs; // keyed by req_id
+@@ -634,10 +635,46 @@ struct wllama_context
      if (is_chat || is_asr)
      {
        std::vector<raw_buffer> dummy_files; // unused
@@ -88,6 +108,147 @@ index d742491..d8ec549 100644
            dummy_files,
            chat_session);
        body = std::move(body_parsed);
+@@ -1403,70 +1440,89 @@ struct wllama_context
+     PARSE_REQ(glue_msg_systemone_req);
+     glue_msg_systemone_res res;
+ 
++    const auto fail = [&](const std::string & message, error_type type) {
++      res.success.value = false;
++      res.error_json.value = safe_json_to_str(format_error_response(message, type));
++    };
+     if (decision.type == COMMON_DECISION_TYPE_NONE)
+     {
+-      throw app_exception("This model is not a decision model");
++      fail("This model is not a decision model", ERROR_TYPE_NOT_SUPPORTED);
++      return res;
+     }
+ 
+-    json body = json::parse(req.data_json.value);
+-    decision_request dreq;
+-    dreq.questions = decision.parse_questions(body, false);
+-    const auto &questions = dreq.questions;
+-    const size_t set_size = decision.set_size(questions);
+-
+-    std::vector<raw_buffer> files;
+-    const json state = decision.prepare_state(decision.parse_state(body, files));
+-    if (!files.empty())
++    try
+     {
+-      throw app_exception("Image input is not supported for systemone");
+-    }
++      json body = json::parse(req.data_json.value);
++      decision_request dreq;
++      dreq.questions = decision.parse_questions(body, meta->has_inp_audio);
++      const auto &questions = dreq.questions;
++      const size_t set_size = decision.set_size(questions);
+ 
+-    auto rd = std::make_unique<server_response_reader>(ctx_server.get_response_reader());
++      std::vector<raw_buffer> files;
++      const json state = decision.prepare_state(decision.parse_state(body, files));
++      dreq.has_media = !files.empty();
++      if (dreq.has_media && (!decision.can_use_images() || !meta->has_inp_image))
++      {
++        fail("This server does not support image input for decisions. For a model that supports it, start it with `--mmproj`", ERROR_TYPE_NOT_SUPPORTED);
++        return res;
++      }
+ 
+-    // same as post_systemone of llama-server: one task per variant of each question, or one task for all the questions, or per packed set
+-    dreq.is_packed = decision.is_joint() || set_size > 0;
+-    std::vector<server_task> tasks;
+-    if (decision.is_joint())
+-    {
+-      server_task task = server_task(SERVER_TASK_TYPE_DECISION);
+-      task.id = rd->get_new_id();
+-      decision.fill_task_joint(state, questions, files, nullptr, mtmd_helper_init_opt_default(), task);
+-      tasks.push_back(std::move(task));
+-    }
+-    else if (set_size > 0)
+-    {
+-      for (size_t i = 0; i < questions.size(); i += set_size)
++      auto rd = std::make_unique<server_response_reader>(ctx_server.get_response_reader());
++
++      // same as post_systemone of llama-server: one task per variant of each question, or one task for all the questions, or per packed set
++      dreq.is_packed = decision.is_joint() || set_size > 0;
++      std::vector<server_task> tasks;
++      if (decision.is_joint())
+       {
+-        const std::vector<server_decision_question> set(questions.begin() + i, questions.begin() + std::min(questions.size(), i + set_size));
+         server_task task = server_task(SERVER_TASK_TYPE_DECISION);
+         task.id = rd->get_new_id();
+-        decision.fill_task_set(state, set, files, nullptr, mtmd_helper_init_opt_default(), task);
++        decision.fill_task_joint(state, questions, files, shared_mctx, mtmd_helper_init_opt_default(), task);
+         tasks.push_back(std::move(task));
+       }
+-    }
+-    else
+-    {
+-      for (const auto &question : questions)
++      else if (set_size > 0)
+       {
+-        for (size_t variant = 0; variant < decision.n_variants(question); variant++)
++        for (size_t i = 0; i < questions.size(); i += set_size)
+         {
++          const std::vector<server_decision_question> set(questions.begin() + i, questions.begin() + std::min(questions.size(), i + set_size));
+           server_task task = server_task(SERVER_TASK_TYPE_DECISION);
+           task.id = rd->get_new_id();
+-          decision.fill_task(state, questions, question, variant, files, nullptr, mtmd_helper_init_opt_default(), task);
++          decision.fill_task_set(state, set, files, shared_mctx, mtmd_helper_init_opt_default(), task);
+           tasks.push_back(std::move(task));
+         }
+       }
++      else
++      {
++        for (const auto &question : questions)
++        {
++          for (size_t variant = 0; variant < decision.n_variants(question); variant++)
++          {
++            server_task task = server_task(SERVER_TASK_TYPE_DECISION);
++            task.id = rd->get_new_id();
++            decision.fill_task(state, questions, question, variant, files, shared_mctx, mtmd_helper_init_opt_default(), task);
++            tasks.push_back(std::move(task));
++          }
++        }
++      }
++      dreq.scores.resize(tasks.size());
++      if (decision.can_share_prompt())
++      {
++        tasks = server_decision_group_tasks(std::move(tasks), params.n_parallel);
++      }
++      rd->post_tasks(std::move(tasks));
++
++      res.success.value = true;
++      res.req_id.value = register_reader(std::move(rd));
++      decision_reqs.emplace(res.req_id.value, std::move(dreq));
++      return res;
+     }
+-    dreq.scores.resize(tasks.size());
+-    if (decision.can_share_prompt())
++    catch (const std::invalid_argument &e)
+     {
+-      tasks = server_decision_group_tasks(std::move(tasks), params.n_parallel);
++      fail(e.what(), ERROR_TYPE_INVALID_REQUEST);
++    }
++    catch (const common_json_error &e)
++    {
++      fail(e.what(), ERROR_TYPE_INVALID_REQUEST);
+     }
+-    rd->post_tasks(std::move(tasks));
+-
+-    res.success.value = true;
+-    res.req_id.value = register_reader(std::move(rd));
+-    decision_reqs.emplace(res.req_id.value, std::move(dreq));
+     return res;
+   }
+ 
+@@ -1915,7 +1971,7 @@ struct wllama_context
+       {
+         scores.push_back(dreq.scores[i_result++]);
+       }
+-      answers[question.id] = decision.format_answer(question, scores);
++      answers[question.id] = decision.format_answer(question, scores, dreq.has_media);
+     }
+     return json{
+         {"model", meta->model_name},
 diff --git a/cpp/wllama.cpp b/cpp/wllama.cpp
 index 0474154..02f6657 100644
 --- a/cpp/wllama.cpp
@@ -100,21 +261,21 @@ index 0474154..02f6657 100644
 +    auto res = app->action_##name(req_raw); \
      res.handler.serialize(output_buffer);  \
    }
-
+ 
 @@ -68,7 +68,8 @@ static void printStr(ggml_log_level level, const char *text)
  }
-
+ 
  static glue_outbuf output_buffer;
 -static wllama_context app;
 +// fllama: replace the context on unload to reuse Wasm memory on iOS Safari.
 +static auto app = std::make_unique<wllama_context>();
-
+ 
  static std::vector<char> input_buffer;
  // second argument is dummy
 @@ -172,6 +173,22 @@ extern "C" void wllama_rpc_serve(int port, int n_threads)
    ggml_backend_rpc_start_server(endpoint.c_str(), nullptr, n_threads, 1, &dev);
  }
-
+ 
 +// fllama: free the model/context before replacing the worker's input files.
 +extern "C" const char *wllama_unload()
 +{
@@ -134,13 +295,50 @@ index 0474154..02f6657 100644
  extern "C" const char *wllama_exit()
  {
    try
+diff --git a/src/glue/messages.ts b/src/glue/messages.ts
+index 8abb849..e425d33 100644
+--- a/src/glue/messages.ts
++++ b/src/glue/messages.ts
+@@ -686,6 +686,11 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
+         "name": "success",
+         "isNullable": false
+       },
++      {
++        "type": "str",
++        "name": "error_json",
++        "isNullable": false
++      },
+       {
+         "type": "int",
+         "name": "req_id",
+@@ -1194,6 +1199,7 @@ export interface GlueMsgSystemoneReq {
+ export interface GlueMsgSystemoneRes {
+   _name: "sys1_res";
+   success: boolean;
++  error_json: string;
+   req_id: number;
+ }
+ 
+diff --git a/src/types/oai-compat.ts b/src/types/oai-compat.ts
+index 39cb417..02ede43 100644
+--- a/src/types/oai-compat.ts
++++ b/src/types/oai-compat.ts
+@@ -401,6 +401,8 @@ export type SystemOneQuestion =
+ 
+ export interface SystemOneParams {
+   state: any;
++  files?: string[];
++  images?: string[];
+   questions: Record<string, SystemOneQuestion>;
+ }
+ 
 diff --git a/src/wllama.ts b/src/wllama.ts
-index 459caa2..0d6af0f 100644
+index 459caa2..dffff1f 100644
 --- a/src/wllama.ts
 +++ b/src/wllama.ts
 @@ -351,6 +351,8 @@ export class WllamaRealtimeSession {
  }
-
+ 
  export class Wllama {
 +  /** fllama: preserve the Wasm allocation on a compatible reload. */
 +  reuseWorker = false;
@@ -150,7 +348,7 @@ index 459caa2..0d6af0f 100644
 @@ -674,15 +676,20 @@ export class Wllama {
        );
      }
-
+ 
 -    if (this.proxy) {
 +    if (this.proxy && !this.reuseWorker) {
        throw new WllamaError('Module is already initialized', 'load_error');
@@ -168,7 +366,7 @@ index 459caa2..0d6af0f 100644
 -    this.nbThreads = nbThreads;
 -    this.useMultiThread = supportMultiThread && nbThreads > 1;
 +    const useMultiThread = supportMultiThread && nbThreads > 1;
-
+ 
      // before creating the worker, so a bad file does not leave this instance half initialized
      // a copy: the caller can change it while the files are prepared
 @@ -734,14 +741,29 @@ export class Wllama {
@@ -223,7 +421,7 @@ index 459caa2..0d6af0f 100644
 +      } else {
 +        const rpc = await this.startRpcWorkers(nRpcWorkers, workerResources, ownRpcWorkers);
 +        await proxy.moduleInit(modelFiles.all, rpc);
-
+ 
 -      // run it
 -      this.logger().debug('Calling wllamaStart...');
 -      const startResult: any = await proxy.wllamaStart();
@@ -241,7 +439,7 @@ index 459caa2..0d6af0f 100644
 +        await this.checkWasmVersion(startResult.version);
        }
 -      await this.checkWasmVersion(startResult.version);
-
+ 
        // load the model
        this.logger().debug('Loading model...');
 @@ -891,7 +915,7 @@ export class Wllama {
@@ -253,7 +451,55 @@ index 459caa2..0d6af0f 100644
          ...params,
          rpc_workers: loadResult.n_rpc_workers,
        });
-@@ -1457,6 +1481,8 @@ export class Wllama {
+@@ -1048,12 +1072,16 @@ export class Wllama {
+ 
+   /**
+    * Answer typed questions about a state, using a decision model (TypeSafe-compatible System One API).
+-   * Image input is not supported yet.
+-   * @param options The state and the questions
++   * @param options The state, questions, and optional media data URLs
++   * @param abortSignal Cancels the decision request
+    * @returns The answer of each question
+    */
+-  async createSystemOne(options: SystemOneParams): Promise<SystemOneResponse> {
++  async createSystemOne(
++    options: SystemOneParams,
++    abortSignal?: AbortSignal
++  ): Promise<SystemOneResponse> {
+     this.checkModelLoaded();
++    if (abortSignal?.aborted) throw new WllamaAbortError();
+ 
+     const result = await this.proxy.wllamaAction<GlueMsgSystemoneRes>(
+       'systemone',
+@@ -1064,15 +1092,22 @@ export class Wllama {
+     );
+ 
+     if (!result.success) {
+-      throw new WllamaError(
+-        'Model failed to start systemone',
+-        'inference_error'
+-      );
++      if (abortSignal?.aborted) throw new WllamaAbortError();
++      throw this.systemOneError(result.error_json);
+     }
+ 
+     return await this.getSingleResult<SystemOneResponse>(
+       result.req_id,
+-      'systemone'
++      'systemone',
++      abortSignal
++    );
++  }
++
++  private systemOneError(jsonString: string): WllamaError {
++    const data = this.jsonDecode(jsonString);
++    return Object.assign(
++      new WllamaError(data.message || 'Unknown systemone error', 'inference_error'),
++      { serverErrorType: data.type }
+     );
+   }
+ 
+@@ -1457,6 +1492,8 @@ export class Wllama {
      const proxy = this.proxy;
      const rpcWorkers = this.rpcWorkers;
      this.proxy = null as any;
@@ -262,8 +508,8 @@ index 459caa2..0d6af0f 100644
      this.rpcWorkers = [];
      await proxy?.wllamaExit();
      // rpc workers are blocked in the wasm, terminate them
-@@ -1472,7 +1498,8 @@ export class Wllama {
-
+@@ -1472,7 +1509,8 @@ export class Wllama {
+ 
    private pickRpcWorkers(
      params: LoadModelParams,
 -    resources: WllamaWorkerResources
@@ -272,7 +518,7 @@ index 459caa2..0d6af0f 100644
    ): number {
      if (params.rpc_workers !== undefined) {
        const n = params.rpc_workers;
-@@ -1482,7 +1509,7 @@ export class Wllama {
+@@ -1482,7 +1520,7 @@ export class Wllama {
            'load_error'
          );
        }
@@ -281,7 +527,7 @@ index 459caa2..0d6af0f 100644
          throw new WllamaError(
            'rpc_workers needs multi-thread, see the Cross-Origin headers in README',
            'load_error'
-@@ -1500,7 +1527,8 @@ export class Wllama {
+@@ -1500,7 +1538,8 @@ export class Wllama {
    // undefined: no measure. It reads the metadata one more time, so small files skip it
    private autoRpcMemMax(
      files: { blob: Blob }[],
@@ -291,7 +537,7 @@ index 459caa2..0d6af0f 100644
    ): number | undefined {
      const size = files.reduce((sum, f) => sum + f.blob.size, 0);
      if (size < RPC_CONFIG.autoMinSize) return undefined;
-@@ -1511,7 +1539,7 @@ export class Wllama {
+@@ -1511,7 +1550,7 @@ export class Wllama {
        return undefined;
      }
      // the main wasm does the rpc I/O in its own threads
@@ -300,6 +546,46 @@ index 459caa2..0d6af0f 100644
        ? RPC_CONFIG.mainMemMax
        : RPC_CONFIG.singleThreadMemMax;
    }
+@@ -1814,18 +1853,26 @@ export class Wllama {
+     }
+   }
+ 
+-  private async getSingleResult<T>(reqId: number, task: string): Promise<T> {
++  private async getSingleResult<T>(
++    reqId: number,
++    task: string,
++    abortSignal?: AbortSignal
++  ): Promise<T> {
+     let completed = false;
+     try {
+       while (true) {
++        if (abortSignal?.aborted) throw new WllamaAbortError();
+         const chunk = await this.proxy.wllamaAction<GlueMsgGetResultRes>(
+           'get_result',
+           { _name: 'gres_req', req_id: reqId }
+         );
+ 
++        completed = !chunk.has_more;
++        if (abortSignal?.aborted) throw new WllamaAbortError();
+         const jsonString = chunk.data_json;
+         if (jsonString && jsonString.length > 0) {
+           if (chunk.is_error) {
++            if (task === 'systemone') throw this.systemOneError(jsonString);
+             const jsonData = this.jsonDecode(jsonString);
+             throw new WllamaError(
+               jsonData.message || `Unknown ${task} error`,
+@@ -1836,10 +1883,7 @@ export class Wllama {
+           return this.jsonDecode(jsonString);
+         }
+ 
+-        if (!chunk.has_more) {
+-          completed = true;
+-          break;
+-        }
++        if (completed) break;
+       }
+ 
+       throw new WllamaError(`No ${task} result received`, 'inference_error');
 diff --git a/src/worker.ts b/src/worker.ts
 index 36047b9..ddac3f3 100644
 --- a/src/worker.ts
@@ -315,7 +601,7 @@ index 36047b9..ddac3f3 100644
 @@ -312,6 +313,27 @@ export class ProxyToWorker {
      return parsedResult as T;
    }
-
+ 
 +  /** fllama: only for a worker using async file reads (nothing on heap). */
 +  async replaceFiles(files: { name: string; blob: Blob }[]): Promise<void> {
 +    if (!this.useAsyncFile) {
@@ -360,7 +646,7 @@ index 0e579ac..c511b15 100644
 +let wllamaUnload;
  let wllamaDebug;
  let wllamaRpcServe;
-
+ 
 @@ -37,10 +38,12 @@ const getHeapU8 = () => {
  // Get module config that forwards stdout/err to main thread
  const getWModuleConfig = (_argMainScriptBlob, wasmModule) => {
@@ -370,10 +656,10 @@ index 0e579ac..c511b15 100644
 +  // on Safari a pthread beyond the initial pool may never start.
 +  var pthreadPoolSize = RUN_OPTIONS.nbThread * 2;
    var argMainScriptBlob = _argMainScriptBlob;
-
+ 
 -  hasMultithread = pthreadPoolSize > 1;
 +  hasMultithread = RUN_OPTIONS.nbThread > 1;
-
+ 
    msg({
      verb: 'console.debug',
 @@ -585,6 +588,7 @@ onmessage = async (e) => {
@@ -387,7 +673,7 @@ index 0e579ac..c511b15 100644
 @@ -674,6 +678,28 @@ onmessage = async (e) => {
      return;
    }
-
+ 
 +  if (verb === 'wllama.unload') {
 +    await runWasmCall(callbackId, async () => {
 +      try {

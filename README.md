@@ -81,7 +81,7 @@ Rebuild the Linux runner. `readelf -d <runner>` should list `libgcc_s.so.1`
 before `libflutter_linux_gtk.so` in `NEEDED`. The example runner already does
 this. Remove the workaround when your Flutter SDK includes the upstream fix.
 
-### Realtime voice (native only)
+### Realtime voice
 `fllamaRealtimeOpen` runs a session of llama.cpp's realtime API, the
 `/v1/realtime` WebSocket of llama-server, in process. Events are the JSON
 objects of OpenAI Realtime GA; see "WebSocket `/v1/realtime`" in
@@ -109,9 +109,10 @@ session.send({'type': 'response.create'});
 The server does no turn detection: the app commits each turn. The
 conversation stays in the context, and audio uses it (LFM3-Audio: about
 12.5 positions per second of input). A full context ends the session with
-an error. A session holds one of the model's four slots until it ends.
+an error. A session holds one inference slot until it ends. Web loads one
+slot by default. Close the session before you use another model.
 
-### Decisions (native only)
+### Decisions
 `fllamaDecide` runs llama.cpp's decision API, `POST /v1/systemone` of
 llama-server, in process: typed questions about a state, answered by a
 decision model in one forward pass, with no generated text. The request and
@@ -147,7 +148,10 @@ The model reads the whole prompt, with its images and audio, in one batch:
 ## Tips & Tricks
 ### Web
   Web uses a wllama/WebGPU runtime. In a Flutter web build, the fllama build hook installs it in `web/kiln/fllama_cpp/` of the app, and fllama loads it at the first call; the app needs no script tag (kiln ADR 002). Other embedders serve those files and set `FllamaWeb.runtimeUri`.
-  For best performance, serve the app with cross-origin isolation enabled so the multi-threaded WebAssembly backend can run.
+  Serve the app with cross-origin isolation to use multiple Wasm threads.
+  For decisions and realtime, pass model and projector URLs or browser-local
+  model locators, as for chat. The browser selects the WebGPU adapter and
+  does not use `gpuDeviceKey`.
 
   To check the web runtime locally:
   ```sh

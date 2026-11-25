@@ -76,15 +76,15 @@ Future<int> fllamaTokenize(FllamaTokenizeRequest request) async {
   throw UnimplementedError();
 }
 
-/// The realtime API runs on native platforms only.
+/// This platform does not support the realtime API.
 FllamaRealtimeSession fllamaRealtimeOpen(FllamaRealtimeRequest request) {
-  throw UnsupportedError('The realtime API runs on native platforms only');
+  throw UnsupportedError('This platform does not support the realtime API');
 }
 
-/// The decision API runs on native platforms only.
+/// This platform does not support the decision API.
 FllamaDecision fllamaDecide(
   FllamaDecisionRequest request,
   Map<String, dynamic> body,
 ) {
-  throw UnsupportedError('The decision API runs on native platforms only');
+  throw UnsupportedError('This platform does not support the decision API');
 }

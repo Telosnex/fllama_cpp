@@ -42,6 +42,73 @@ void main() {
     expect(count, 4);
   });
 
+  test('Decision cancellation is typed before the model loads', () async {
+    final decision = fllamaDecide(
+      FllamaDecisionRequest(modelPath: model),
+      const {'state': 'test', 'questions': {}},
+    );
+    decision.cancel();
+    await expectLater(
+      decision.response,
+      throwsA(
+        isA<FllamaError>().having(
+          (e) => e.type,
+          'type',
+          FllamaErrorType.cancelled,
+        ),
+      ),
+    );
+  });
+
+  test('Decision reports notSupported for a text generation model', () async {
+    await expectLater(
+      fllamaDecide(
+        FllamaDecisionRequest(modelPath: model, contextSize: 128),
+        const {
+          'state': 'Once upon a time',
+          'questions': {
+            'question': {'type': 'noul', 'instructions': 'Is this a story?'},
+          },
+        },
+      ).response,
+      throwsA(
+        isA<FllamaError>().having(
+          (e) => e.type,
+          'type',
+          FllamaErrorType.notSupported,
+        ),
+      ),
+    );
+  });
+
+  test('Realtime reports a model load error, then ends', () async {
+    final session = fllamaRealtimeOpen(
+      FllamaRealtimeRequest(modelPath: '$model.missing.gguf', mmprojPath: ''),
+    );
+    expect(session.send({'type': 'response.create'}), isTrue);
+    final events = await session.events.toList();
+    expect(events.map((event) => event['type']), [
+      'error',
+      FllamaRealtimeSession.closedEventType,
+    ]);
+    expect(events.first['error']['type'], 'model_load');
+    expect(events.last['reason'], 'error');
+    expect(session.send({'type': 'response.create'}), isFalse);
+  });
+
+  test('Realtime close before model load sends one closed event', () async {
+    final session = fllamaRealtimeOpen(
+      FllamaRealtimeRequest(modelPath: model, mmprojPath: ''),
+    );
+    expect(session.send({'type': 'response.create'}), isTrue);
+    session.close();
+    session.close();
+    expect(session.send({'type': 'response.create'}), isFalse);
+    expect(await session.events.toList(), [
+      {'type': FllamaRealtimeSession.closedEventType, 'reason': 'client'},
+    ]);
+  });
+
   // Audit item 2: fllamaChat on web sent `input` ('') and dropped the
   // conversation in openAiRequestJsonString.
   test('fllamaChat sends the conversation to the model', () async {

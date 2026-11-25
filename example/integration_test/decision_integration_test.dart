@@ -25,18 +25,8 @@ import 'test/initialize.dart';
 const _dir = String.fromEnvironment('FLLAMA_DECISION_DIR');
 
 void main() {
-  if (kIsWeb) {
-    test('fllamaDecide is native only', () {
-      expect(
-        () => fllama.fllamaDecide(
-          const fllama.FllamaDecisionRequest(modelPath: 'm'),
-          const {},
-        ),
-        throwsUnsupportedError,
-      );
-    });
-    return;
-  }
+  // This suite reads models and media from local file paths.
+  if (kIsWeb) return;
 
   group('decision API', () {
     late String model;
