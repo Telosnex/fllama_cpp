@@ -293,15 +293,240 @@ void fllamaCancelInference(int requestId) {
   fllamaCancelInferenceJs(requestId);
 }
 
-/// The realtime API runs on native platforms only.
-FllamaRealtimeSession fllamaRealtimeOpen(FllamaRealtimeRequest request) {
-  throw UnsupportedError('The realtime API runs on native platforms only');
+@JS('fllamaDecideJs')
+external int _decideJs(
+  _JSFllamaModelRequest request,
+  String body,
+  JSFunction done,
+  JSFunction? logger,
+);
+
+@JS('fllamaRealtimeOpenJs')
+external _JSRealtimeSession _realtimeOpenJs(
+  _JSFllamaModelRequest request,
+  String? query,
+  JSFunction onEvent,
+  JSFunction? logger,
+);
+
+extension type _JSFllamaModelRequest._(JSObject _) implements JSObject {
+  external _JSFllamaModelRequest({
+    required String modelPath,
+    String? modelMmprojPath,
+    required int contextSize,
+    required int numGpuLayers,
+    required int numThreads,
+  });
 }
 
-/// The decision API runs on native platforms only.
+extension type _JSRealtimeSession._(JSObject _) implements JSObject {
+  external bool send(String json);
+  external void close();
+}
+
+/// Answers the questions of [body] with the decision model of [request].
+/// [body] is the JSON body of llama-server's `POST /v1/systemone`.
+/// Returns at once. The model loads in the background.
 FllamaDecision fllamaDecide(
   FllamaDecisionRequest request,
   Map<String, dynamic> body,
 ) {
-  throw UnsupportedError('The decision API runs on native platforms only');
+  _checkModelPath(request.modelPath);
+  return _WebDecision(request, jsonEncode(body));
+}
+
+class _WebDecision implements FllamaDecision {
+  _WebDecision(FllamaDecisionRequest request, String body) {
+    unawaited(_start(request, body));
+  }
+
+  final _response = Completer<Map<String, dynamic>>();
+  int? _id;
+
+  @override
+  Future<Map<String, dynamic>> get response => _response.future;
+
+  Future<void> _start(FllamaDecisionRequest request, String body) async {
+    try {
+      await loadFllamaWebRuntime();
+      if (_response.isCompleted) return;
+      _id = _decideJs(
+        _JSFllamaModelRequest(
+          modelPath: request.modelPath,
+          modelMmprojPath: request.mmprojPath,
+          contextSize: request.contextSize,
+          numGpuLayers: request.numGpuLayers,
+          numThreads: request.numThreads,
+        ),
+        body,
+        _done.toJS,
+        request.logger?.toJS,
+      );
+    } catch (error) {
+      if (!_response.isCompleted) {
+        _response.completeError(
+          FllamaError(FllamaErrorType.modelLoad, error.toString()),
+        );
+      }
+    }
+  }
+
+  @override
+  void cancel() {
+    if (_response.isCompleted) return;
+    final id = _id;
+    if (id != null) fllamaCancelInferenceJs(id);
+    _response.completeError(
+      const FllamaError(FllamaErrorType.cancelled, 'Cancelled'),
+    );
+  }
+
+  void _done(String text, String? errorJson) {
+    if (_response.isCompleted) return;
+    if (errorJson != null) {
+      _response.completeError(FllamaError.fromJson(errorJson));
+      return;
+    }
+    final decoded = _decodeObject(text);
+    if (decoded != null) {
+      _response.complete(decoded);
+    } else {
+      _response.completeError(
+        FllamaError(
+          FllamaErrorType.other,
+          'fllama: the response is not a JSON object: $text',
+        ),
+      );
+    }
+  }
+}
+
+/// Starts a session of llama.cpp's realtime API with [request]'s model.
+/// Returns at once. The model loads in the background. Events sent before
+/// `session.created` wait for it.
+FllamaRealtimeSession fllamaRealtimeOpen(FllamaRealtimeRequest request) {
+  _checkModelPath(request.modelPath);
+  return _WebRealtimeSession(request);
+}
+
+class _WebRealtimeSession implements FllamaRealtimeSession {
+  _WebRealtimeSession(FllamaRealtimeRequest request) {
+    unawaited(_start(request));
+  }
+
+  final _events = StreamController<Map<String, dynamic>>();
+  final _pending = <String>[];
+  _JSRealtimeSession? _session;
+  bool _closing = false;
+  bool _ended = false;
+
+  @override
+  Stream<Map<String, dynamic>> get events => _events.stream;
+
+  Future<void> _start(FllamaRealtimeRequest request) async {
+    try {
+      await loadFllamaWebRuntime();
+      if (_closing) return;
+      final session = _realtimeOpenJs(
+        _JSFllamaModelRequest(
+          modelPath: request.modelPath,
+          modelMmprojPath: request.mmprojPath,
+          contextSize: request.contextSize,
+          numGpuLayers: request.numGpuLayers,
+          numThreads: request.numThreads,
+        ),
+        request.query,
+        _onEvent.toJS,
+        request.logger?.toJS,
+      );
+      _session = session;
+      for (final json in _pending) {
+        session.send(json);
+      }
+      _pending.clear();
+    } catch (error) {
+      if (_ended) return;
+      _events.add({
+        'type': 'error',
+        'error': _realtimeError('model_load', error.toString()),
+      });
+      _closed('error');
+    }
+  }
+
+  @override
+  bool send(Map<String, dynamic> event) {
+    if (_closing || _ended) return false;
+    final json = jsonEncode(event);
+    final session = _session;
+    if (session != null) return session.send(json);
+    _pending.add(json);
+    return true;
+  }
+
+  @override
+  void close() {
+    if (_closing || _ended) return;
+    _closing = true;
+    final session = _session;
+    if (session != null) {
+      session.close();
+    } else {
+      _closed('client');
+    }
+  }
+
+  void _onEvent(String text) {
+    if (_ended) return;
+    final event =
+        _decodeObject(text) ??
+        {
+          'type': 'error',
+          'error': _realtimeError(
+            'server_error',
+            'fllama: an event is not a JSON object: $text',
+          ),
+        };
+    _events.add(event);
+    if (event['type'] == FllamaRealtimeSession.closedEventType) {
+      _finish();
+    }
+  }
+
+  void _closed(String reason) {
+    _events.add({
+      'type': FllamaRealtimeSession.closedEventType,
+      'reason': reason,
+    });
+    _finish();
+  }
+
+  void _finish() {
+    _ended = true;
+    _session = null;
+    _pending.clear();
+    unawaited(_events.close());
+  }
+}
+
+Map<String, dynamic> _realtimeError(String type, String message) => {
+  'type': type,
+  'code': null,
+  'message': message,
+  'param': null,
+};
+
+Map<String, dynamic>? _decodeObject(String text) {
+  try {
+    final decoded = jsonDecode(text);
+    return decoded is Map<String, dynamic> ? decoded : null;
+  } on FormatException {
+    return null;
+  }
+}
+
+void _checkModelPath(String modelPath) {
+  if (modelPath.isEmpty) {
+    throw ArgumentError.value(modelPath, 'modelPath', 'is empty');
+  }
 }

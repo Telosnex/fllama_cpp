@@ -116,14 +116,10 @@ const _cudaPackHeaders = {
   'gguf.h',
 };
 
-/// Files in ggml/src that belong to the `ggml` loader library, not to
-/// ggml-base. ggml-cuda does not link it; GGML_BACKEND_API_VERSION in
-/// ggml-backend-impl.h is the contract between them.
-const _cudaPackLoaderSources = {
-  'ggml-backend-dl.cpp',
-  'ggml-backend-dl.h',
-  'ggml-backend-reg.cpp',
-};
+/// Loader source files that ggml-cuda does not build or link. The CUDA
+/// backend now includes ggml-backend-dl.h for its registration macros, so
+/// that header stays in the key.
+const _cudaPackLoaderSources = {'ggml-backend-dl.cpp', 'ggml-backend-reg.cpp'};
 
 /// Files in other ggml/src directories that ggml-base includes:
 /// ggml-quants.c includes ggml-cpu/ggml-cpu-impl.h.

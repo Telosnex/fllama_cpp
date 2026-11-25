@@ -154,10 +154,10 @@ Useful result fields:
 ## WebKit (Safari) and Firefox
 
 `--browser=webkit` (or `FLLAMA_SMOKE_BROWSER=webkit`) runs Playwright's WebKit
-build, the engine of Safari: `npx playwright install webkit` once. WebKit has
-no WebAssembly Memory64 or JSPI, so wllama loads the compat build.
+build, the engine of Safari: `npx playwright install webkit` once. Safari and WebKit without JSPI or relaxed SIMD use the wasm32 compat build.
+The main build also uses wasm32.
 `--browser=firefox` runs Playwright's Firefox (`npx playwright install
-firefox`), and wllama runs the default build on the CPU. That build runs
+firefox`); wllama can run the main build on CPU without JSPI if relaxed SIMD is available. That build runs
 WebAssembly about 10 times slower than stock Firefox: Qwen3.5 0.8B generates
 2.5 tok/s, and stock Firefox 158 generates 25 tok/s on the same page. So
 `image_title` times out there. Use it to test behavior, not speed.

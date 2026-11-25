@@ -36,8 +36,7 @@ typedef _NativeLog = Void Function(Pointer<Char> message);
 /// final answers = (await decision.response)['answers'];
 /// ```
 ///
-/// Returns at once. The model loads in the background. Native platforms
-/// only.
+/// Returns at once. The model loads in the background.
 FllamaDecision fllamaDecide(
   FllamaDecisionRequest request,
   Map<String, dynamic> body,

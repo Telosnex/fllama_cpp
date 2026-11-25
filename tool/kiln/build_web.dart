@@ -1,9 +1,8 @@
 /// Builds the fllama web runtime: wllama at the commit of
 /// web_build/wllama.json, with web_build/wllama.patch and llama.cpp at its
-/// pinned commit. It writes wllama/index.js, wllama/wasm/wllama.js and
-/// wllama/wasm/wllama.wasm to --out, and the compat build for browsers without
-/// WebAssembly Memory64 or JSPI (Safari): wllama/compat/wllama.js and
-/// wllama/compat/wllama.wasm.
+/// pinned commit. It writes wllama/index.js and two packed Wasm files to
+/// --out: wllama/wasm/wllama.wasm (main) and wllama/compat/wllama.wasm.
+/// Both carry the Emscripten JS glue in a custom section.
 ///
 /// It runs in the emsdk image of wllama.json (kiln ADR 002 D10,
 /// D11): the kiln release workflow runs it there, and so does a local build.
@@ -30,9 +29,7 @@ const _usage =
 
 const _outputs = {
   'esm/index.js': 'wllama/index.js',
-  'src/wasm/wllama.js': 'wllama/wasm/wllama.js',
   'src/wasm/wllama.wasm': 'wllama/wasm/wllama.wasm',
-  'compat/wasm/wllama.js': 'wllama/compat/wllama.js',
   'compat/wasm/wllama.wasm': 'wllama/compat/wllama.wasm',
 };
 
@@ -50,6 +47,7 @@ Future<void> main(List<String> args) async {
           as Map<String, dynamic>;
   final llama = pin['llamaCpp'] as Map<String, dynamic>;
   final dawn = pin['dawn'] as Map<String, dynamic>;
+  final binaryen = pin['binaryen'] as Map<String, dynamic>;
 
   final emcc = await _output(['emcc', '--version'], root);
   if (!emcc.split('\n').first.contains(' ${pin['emscripten']} ')) {
@@ -64,7 +62,8 @@ Future<void> main(List<String> args) async {
       r'[0-9][0-9.]* \([0-9a-f]+\)',
     ).firstMatch(emcc.split('\n').first)?[0];
     await File(path).writeAsString(
-      'Emscripten ${version ?? pin['emscripten']}, Node ${pin['node']}\n',
+      'Emscripten ${version ?? pin['emscripten']}, Node ${pin['node']}, '
+      'Binaryen ${binaryen['commit']} (compat, patched)\n',
     );
   }
 
@@ -147,7 +146,7 @@ Future<void> main(List<String> args) async {
     'llama.cpp',
   ], root);
   if (!gitlink.contains(llama['commit'] as String)) {
-    _fail('The patch does not pin llama.cpp ${llama['commit']}: $gitlink');
+    _fail('wllama does not pin llama.cpp ${llama['commit']}: $gitlink');
   }
 
   // The Dawn WebGPU package of wllama's build.
@@ -168,43 +167,47 @@ Future<void> main(List<String> args) async {
   ], root);
 
   // npm run build:wasm (scripts/docker-compose.yml): the default build, with
-  // JSPI and Memory64, then the compat build, with Asyncify and 32-bit memory.
+  // JSPI and relaxed SIMD, then compat with Asyncify. Both are wasm32 and
+  // support sharing model weights across RPC workers when threading is enabled.
   final builds = {
     'build': (flags: ['-DGGML_WEBGPU_JSPI=ON'], wasmDir: 'src/wasm'),
     'build-compat': (
-      flags: [
-        '-DWLLAMA_COMPAT=ON',
-        '-DLLAMA_WASM_MEM64=OFF',
-        '-DGGML_WEBGPU_JSPI=OFF',
-      ],
+      flags: ['-DWLLAMA_COMPAT=ON', '-DGGML_WEBGPU_JSPI=OFF'],
       wasmDir: 'compat/wasm',
     ),
   };
   for (final MapEntry(key: dir, value: (:flags, :wasmDir)) in builds.entries) {
+    final env = dir == 'build-compat'
+        ? await _buildCompatBinaryen(binaryen, work.path, wllama)
+        : const <String, String>{};
     final build = '$wllama/$dir';
     await Directory(build).create(recursive: true);
-    await _run([
-      'emcmake',
-      'cmake',
-      '..',
-      '-DGGML_WEBGPU=ON',
-      ...flags,
-      '-DEMDAWNWEBGPU_DIR=${emdawn.path}/emdawnwebgpu_pkg',
-      '-DWLLAMA_TEST_BACKEND=OFF',
-    ], build);
-    await _run([
-      'emmake',
-      'make',
-      'wllama',
-      '-j${Platform.numberOfProcessors}',
-    ], build);
+    await _run(
+      [
+        'emcmake',
+        'cmake',
+        '..',
+        '-DEMSCRIPTEN_SYSTEM_PROCESSOR=wasm',
+        '-DLLAMA_WASM_MEM64=OFF',
+        '-DGGML_RPC=ON',
+        '-DGGML_WEBGPU=ON',
+        ...flags,
+        '-DEMDAWNWEBGPU_DIR=${emdawn.path}/emdawnwebgpu_pkg',
+        '-DWLLAMA_TEST_BACKEND=OFF',
+      ],
+      build,
+      environment: env,
+    );
+    await _run(
+      ['emmake', 'make', 'wllama', '-j${Platform.numberOfProcessors}'],
+      build,
+      environment: env,
+    );
     await Directory('$wllama/$wasmDir').create(recursive: true);
-    await File('$build/wllama.js').copy('$wllama/$wasmDir/wllama.js');
-    // Copies the wasm and adds a name section: function names in stack
-    // traces.
+    // Embed the worker glue and function names (for stack traces) in Wasm.
     await _run([
       'node',
-      'scripts/add_wasm_names.js',
+      'scripts/pack_wasm.js',
       '$dir/wllama.wasm',
       '$wasmDir/wllama.wasm',
     ], wllama);
@@ -219,11 +222,23 @@ Future<void> main(List<String> args) async {
   if (!generated.contains("LIBLLAMA_VERSION = '${llama['version']}'")) {
     _fail('LIBLLAMA_VERSION is not ${llama['version']}');
   }
-  // Both wasm files carry the version that generated.ts expects.
+  // Upstream's check compares hashes only, to allow its shallow clones. Both
+  // packed outputs here must contain the full stamp, including the build number.
+  for (final file in ['src/wasm/wllama.wasm', 'compat/wasm/wllama.wasm']) {
+    final wasm = latin1.decode(await File('$wllama/$file').readAsBytes());
+    if (!wasm.contains('"version":"${llama['version']}"')) {
+      _fail('$file does not contain the stamp ${llama['version']}');
+    }
+  }
   await _run(['node', 'scripts/check_wasm_version.js'], wllama);
   await _run(['npx', 'tsc', '--noEmit', '-p', 'tsconfig.build.json'], wllama);
   await _run(['npm', 'run', 'build:tsup'], wllama);
 
+  // --out may have files from a previous (pre-v4) build.
+  for (final dir in ['wasm', 'compat']) {
+    final stale = File('${out.path}/wllama/$dir/wllama.js');
+    if (await stale.exists()) await stale.delete();
+  }
   stdout.writeln('Built:');
   for (final MapEntry(key: from, value: to) in _outputs.entries) {
     final target = File('${out.path}/$to');
@@ -233,6 +248,72 @@ Future<void> main(List<String> args) async {
       '  ${await _sha256(target.path, root)}  ${await target.length()}  $to',
     );
   }
+}
+
+// Compat uses Wasm exception handling with Asyncify. The pinned emsdk's
+// wasm-opt does not support try in Asyncify without wllama's Binaryen patch.
+// Overlay just that executable, instead of mutating a shared emsdk install.
+Future<Map<String, String>> _buildCompatBinaryen(
+  Map<String, dynamic> pin,
+  String work,
+  String wllama,
+) async {
+  final sdk = (await _output(['em-config', 'BINARYEN_ROOT'], wllama)).trim();
+  final expected = pin['commit'] as String;
+  final version = await _output(['$sdk/bin/wasm-opt', '--version'], wllama);
+  final revision = RegExp(r'-g([0-9a-f]+)\)').firstMatch(version)?[1];
+  if (revision == null || !expected.startsWith(revision)) {
+    _fail('Binaryen $expected required, found ${version.trim()}');
+  }
+  final patch = '$wllama/${pin['patch']}';
+  if (await _sha256(patch, wllama) != pin['patchSha256']) {
+    _fail('Unexpected Binaryen patch checksum: $patch');
+  }
+  final source = '$work/binaryen';
+  await _run(['git', 'init', '-q', source], wllama);
+  await _run([
+    'git',
+    'fetch',
+    '--depth',
+    '1',
+    pin['repository'] as String,
+    expected,
+  ], source);
+  await _run(['git', 'checkout', '-q', '--detach', 'FETCH_HEAD'], source);
+  await _run(['git', 'submodule', 'update', '--init', '--depth', '1'], source);
+  await _run(['git', 'apply', patch], source);
+  await _run([
+    'cmake',
+    '-S',
+    '.',
+    '-B',
+    'build',
+    '-DCMAKE_BUILD_TYPE=Release',
+    '-DBUILD_TESTS=OFF',
+    '-DBUILD_STATIC_LIB=ON',
+    '-DENABLE_WERROR=OFF',
+  ], source);
+  await _run([
+    'cmake',
+    '--build',
+    'build',
+    '--target',
+    'wasm-opt',
+    '--parallel',
+    (Platform.numberOfProcessors > 8 ? 8 : Platform.numberOfProcessors)
+        .toString(),
+  ], source);
+  final overlay = '$work/compat-binaryen';
+  final bin = Directory('$overlay/bin');
+  await bin.create(recursive: true);
+  await for (final entry in Directory('$sdk/bin').list(followLinks: false)) {
+    final name = entry.uri.pathSegments.last;
+    if (name.isEmpty) continue;
+    await Link(
+      '${bin.path}/$name',
+    ).create(name == 'wasm-opt' ? '$source/build/bin/wasm-opt' : entry.path);
+  }
+  return {'EM_BINARYEN_ROOT': overlay};
 }
 
 Map<String, String> _parse(List<String> args) {
@@ -279,13 +360,18 @@ Future<String> _output(List<String> command, String cwd) async {
   return '${result.stdout}';
 }
 
-Future<void> _run(List<String> command, String cwd) async {
+Future<void> _run(
+  List<String> command,
+  String cwd, {
+  Map<String, String>? environment,
+}) async {
   stdout.writeln('+ ${command.join(' ')}');
   final process = await Process.start(
     command.first,
     command.skip(1).toList(),
     workingDirectory: cwd,
     mode: ProcessStartMode.inheritStdio,
+    environment: environment,
   );
   final code = await process.exitCode;
   if (code != 0) _fail('${command.join(' ')} failed with exit code $code.');

@@ -11,7 +11,7 @@
 // `cudaToolkitRoot` (hook/cuda_pack.dart). Windows also needs Visual Studio;
 // the build selects the toolkit with `cmake -T cuda=<dir>`, so the Visual
 // Studio installation is not changed. This file is in the CUDA pack key:
-// the archives it pins are the runtime files of the pack.
+// it pins the archives with the headers and runtime files of the pack.
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
@@ -28,6 +28,9 @@ const _archives = {
         '9fdc70b4271ed9aad4d64cd7076a7d96ec36512d074b9995fe638de669197391',
     'libcublas/windows-x86_64/libcublas-windows-x86_64-12.8.4.1-archive.zip':
         '57a470112cec7e112c95253dde8b3c7184d795dbd92b0bde77a4cb7f8c94c8aa',
+    // ggml-cuda includes nvml.h but loads NVML from the installed driver.
+    'cuda_nvml_dev/windows-x86_64/cuda_nvml_dev-windows-x86_64-12.8.90-archive.zip':
+        '8504c77c1f28def5d66d7f1c71003bcf02083935c8d490e3538a1dda683222b7',
     'cuda_cccl/windows-x86_64/cuda_cccl-windows-x86_64-12.8.90-archive.zip':
         'bd8548fa1ae82f92910bebc3079e14bd58c5a92aa64596d46bd610a478cb39d7',
     'visual_studio_integration/windows-x86_64/visual_studio_integration-windows-x86_64-12.8.90-archive.zip':
@@ -40,6 +43,9 @@ const _archives = {
         '9961b3484b6b71314063709a4f9529654f96782ad39e72bf1e00f070db8210d3',
     'libcublas/linux-x86_64/libcublas-linux-x86_64-12.8.4.1-archive.tar.xz':
         '21718957c2cf000bacd69d36c95708a2319199e39e056f8b4f0f68e3b9f323bb',
+    // ggml-cuda includes nvml.h but loads NVML from the installed driver.
+    'cuda_nvml_dev/linux-x86_64/cuda_nvml_dev-linux-x86_64-12.8.90-archive.tar.xz':
+        'd68109dcbf59691909c05b01213e5c3d19b4b27f7e7c18e42c6adc0a7f4f6f31',
     'cuda_cccl/linux-x86_64/cuda_cccl-linux-x86_64-12.8.90-archive.tar.xz':
         '0740e9e01e4f15e17c5ab8d68bba4f8ec0eb6b84edccba4ac45112d2d2174e4b',
   },

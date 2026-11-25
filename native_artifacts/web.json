@@ -1,56 +1,40 @@
 {
   "schema": 1,
-  "sourceKey": "7531a0e7a8f4fa5be8ad2f1797c9eee7c2482f07970aac271d21044e32f0cbd6",
-  "release": "https://github.com/Telosnex/fllama_cpp/releases/tag/native-7531a0e7a8f4fa5b",
+  "sourceKey": "6e0c819fbd2eeb8b47c81584e7e9495dcb1c392dfc5a4e38b1a5299b374ca3bd",
+  "release": "https://github.com/Telosnex/fllama_cpp/releases/tag/native-6e0c819fbd2eeb8b",
   "runner": "ubuntu-24.04, emscripten/emsdk@sha256:460fff8f8ac87e11b16447fbd66538a686eafa0e4fb977aa0989ed19fe2079f7",
-  "toolchain": "Emscripten 4.0.20 (6913738ec5371a88c4af5a80db0ab42bad3de681), Node 22.16.0",
-  "webVersion": "d1846916164b11f1",
+  "toolchain": "Emscripten 4.0.20 (6913738ec5371a88c4af5a80db0ab42bad3de681), Node 22.16.0, Binaryen 6d5fed324a603d7f8c9f1800a03043fb62abc7d2 (compat, patched)",
+  "webVersion": "da5de72883bebe29",
   "files": [
     {
       "name": "fllama_web_init.js",
-      "sha256": "858f74aa866961508f6d4ed8ce42f80df171acdd1ca5e9118464cd46854f5d51",
-      "bytes": 44792,
+      "sha256": "5b0995bd6b86b19a5eeb295f8532165aadd1e922ae187308c9f44f00482efdab",
+      "bytes": 52812,
       "source": "lib/web/fllama_web_init.js"
     },
     {
-      "name": "wllama/compat/wllama.js",
-      "sha256": "40e731e84b15bb61612442980911cc1742ede82df412cc703728a413fa5fe289",
-      "bytes": 173675,
-      "source": "release",
-      "url": "https://github.com/Telosnex/fllama_cpp/releases/download/native-7531a0e7a8f4fa5b/web-wllama__compat__wllama.js.gz",
-      "downloadSha256": "c700af758a92194bb95ab02322af22af80537deb97460f10186982404594b2fb"
-    },
-    {
       "name": "wllama/compat/wllama.wasm",
-      "sha256": "a7e8f7291d5ccf8668f7b99a1c23ded84da5e3edb91374a8daaeb66a297465cf",
-      "bytes": 18768254,
+      "sha256": "1e411d5bf0f58d8f640ba3509eb93b92c45f7641bac87eb650ea57ed86084785",
+      "bytes": 17654386,
       "source": "release",
-      "url": "https://github.com/Telosnex/fllama_cpp/releases/download/native-7531a0e7a8f4fa5b/web-wllama__compat__wllama.wasm.gz",
-      "downloadSha256": "8be35e77aed5a65d18e2456faac40831ac4093a110a40df5d3e7ce085fcbe37f"
+      "url": "https://github.com/Telosnex/fllama_cpp/releases/download/native-6e0c819fbd2eeb8b/web-wllama__compat__wllama.wasm.gz",
+      "downloadSha256": "fdbad940d23dc0a2ab94778583b349fcee8697fe30c06506ae95d2e94a2d64c6"
     },
     {
       "name": "wllama/index.js",
-      "sha256": "02950e10b054f43c046660fd2f139ac3c3d6feee95f06bb6fc25d22ad505cca6",
-      "bytes": 279561,
+      "sha256": "c755d842f0c8ed5561ae97ba6a5b33a6e92d4aa13b726f91dca389e2b65d078f",
+      "bytes": 200477,
       "source": "release",
-      "url": "https://github.com/Telosnex/fllama_cpp/releases/download/native-7531a0e7a8f4fa5b/web-wllama__index.js.gz",
-      "downloadSha256": "d0566cf557bc5e2baed0938a7ad6a51b97947e786fd295760a863d325cd5fff3"
-    },
-    {
-      "name": "wllama/wasm/wllama.js",
-      "sha256": "337e8fc14e19dbbbeae76e32a97e320202a57eb97ef640d2ba6cdd557131e7bf",
-      "bytes": 138702,
-      "source": "release",
-      "url": "https://github.com/Telosnex/fllama_cpp/releases/download/native-7531a0e7a8f4fa5b/web-wllama__wasm__wllama.js.gz",
-      "downloadSha256": "53453728835ad4da4127d62f849d37a4bbb413d14125b75ca8c0bb0f6d8a8628"
+      "url": "https://github.com/Telosnex/fllama_cpp/releases/download/native-6e0c819fbd2eeb8b/web-wllama__index.js.gz",
+      "downloadSha256": "3cc799fd75559bfb7788c5e6497534935c011d48ed6ba8eb6b52f8ac7c4b9507"
     },
     {
       "name": "wllama/wasm/wllama.wasm",
-      "sha256": "0d5eaf47af66c5df41d2f39b1b01a62e96784694650f59d7d6ead198e8021b79",
-      "bytes": 10252263,
+      "sha256": "7ebf62185dc1f01b4b5f7008a4917e678640497dfee3d7731fce0d3b0fc4cc26",
+      "bytes": 10847037,
       "source": "release",
-      "url": "https://github.com/Telosnex/fllama_cpp/releases/download/native-7531a0e7a8f4fa5b/web-wllama__wasm__wllama.wasm.gz",
-      "downloadSha256": "3ad1e8dd753faa50eba795be5458fc0c2705da10316f113babd7746ed1d87de7"
+      "url": "https://github.com/Telosnex/fllama_cpp/releases/download/native-6e0c819fbd2eeb8b/web-wllama__wasm__wllama.wasm.gz",
+      "downloadSha256": "47cb8df8fd739843f5772923b870d6c4f871cb6c0565778697aecf7b86fd31b5"
     }
   ]
 }

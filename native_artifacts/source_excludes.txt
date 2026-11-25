@@ -54,7 +54,7 @@ src/llama.cpp/tools/rpc/
 src/llama.cpp/tools/tokenize/
 src/llama.cpp/tools/tts/
 src/llama.cpp/tools/tuning/
-src/llama.cpp/tools/ui/
+src/llama.cpp/ui/
 src/llama.cpp/ggml/src/ggml-cann/
 src/llama.cpp/ggml/src/ggml-et/
 src/llama.cpp/ggml/src/ggml-hexagon/

@@ -1,11 +1,11 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 559521b..7303907 100644
+index 4fbef69..4063017 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -25,10 +25,13 @@ set(WLLAMA_LINK_OPTIONS
+@@ -24,10 +24,13 @@ set(WLLAMA_LINK_OPTIONS
+     -sEXPORT_ES6=0
      -sMODULARIZE=0
      -sINITIAL_MEMORY=128MB
-     -sMAXIMUM_MEMORY=4096MB
 -    -sSTACK_SIZE=5MB
 +    # fllama: Gemma tool / response-format grammars exhaust 5 MB.
 +    -sSTACK_SIZE=16MB
@@ -13,34 +13,54 @@ index 559521b..7303907 100644
 +    -sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=_localtime_js
      -sALLOW_MEMORY_GROWTH=1
      -sFORCE_FILESYSTEM=1
--    -sEXPORTED_FUNCTIONS=_main,_wllama_malloc,_wllama_start,_wllama_action,_wllama_exit,_wllama_debug
-+    -sEXPORTED_FUNCTIONS=_main,_wllama_malloc,_wllama_start,_wllama_action,_wllama_exit,_wllama_unload,_wllama_debug
+-    -sEXPORTED_FUNCTIONS=_main,_wllama_malloc,_wllama_start,_wllama_action,_wllama_exit,_wllama_debug,_wllama_rpc_serve
++    -sEXPORTED_FUNCTIONS=_main,_wllama_malloc,_wllama_start,_wllama_action,_wllama_exit,_wllama_unload,_wllama_debug,_wllama_rpc_serve
      -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,HEAPU8,MEMFS,FS,mmapAlloc,ENV,wasmMemory
      -sNO_EXIT_RUNTIME=1
      -sIMPORTED_MEMORY=1
-@@ -59,7 +62,7 @@ if (WLLAMA_COMPAT)
-     list(APPEND WLLAMA_LINK_OPTIONS
-         -fexceptions
+@@ -65,7 +68,7 @@ if (WLLAMA_COMPAT)
+         -fwasm-exceptions
+         -sMAXIMUM_MEMORY=4096MB
          -sASYNCIFY=1
--        -sASYNCIFY_ADD=['wllama_start','wllama_action']
-+        -sASYNCIFY_ADD=['wllama_start','wllama_action','wllama_unload']
+-        -sASYNCIFY_ADD=['wllama_start','wllama_action','wllama_rpc_serve']
++        -sASYNCIFY_ADD=['wllama_start','wllama_action','wllama_rpc_serve','wllama_unload']
      )
  else()
-     list(APPEND WLLAMA_COMPILE_OPTIONS
-@@ -71,7 +74,7 @@ else()
-         -sMEMORY64=1
+     # 32-bit memory like compat: about 12% faster on CPU than Memory64
+@@ -76,7 +79,7 @@ else()
+         -sMAXIMUM_MEMORY=4096MB
          -fwasm-exceptions
          -sJSPI
--        -sJSPI_EXPORTS=['wllama_start','wllama_action']
-+        -sJSPI_EXPORTS=['wllama_start','wllama_action','wllama_unload']
+-        -sJSPI_EXPORTS=['wllama_start','wllama_action','wllama_rpc_serve']
++        -sJSPI_EXPORTS=['wllama_start','wllama_action','wllama_rpc_serve','wllama_unload']
      )
  endif()
  
+diff --git a/cpp/glue.hpp b/cpp/glue.hpp
+index 1c0b84a..96c50e7 100644
+--- a/cpp/glue.hpp
++++ b/cpp/glue.hpp
+@@ -670,6 +670,7 @@ struct glue_msg_systemone_res
+ {
+   GLUE_HANDLER("sys1_res")
+   GLUE_FIELD(bool, success)
++  GLUE_FIELD(str, error_json)
+   GLUE_FIELD(int, req_id)
+ };
+ 
 diff --git a/cpp/wllama-context.h b/cpp/wllama-context.h
-index 820c27c..312e6e4 100644
+index d742491..429b38f 100644
 --- a/cpp/wllama-context.h
 +++ b/cpp/wllama-context.h
-@@ -603,10 +603,46 @@ struct wllama_context
+@@ -593,6 +593,7 @@ struct wllama_context
+     std::vector<std::vector<float>> scores; // indexed by task index
+     int32_t n_tokens = 0;
+     bool is_packed = false; // one task holds the scores of several questions
++    bool has_media = false;
+   };
+   std::unordered_map<int, decision_request> decision_reqs; // keyed by req_id
+   std::unordered_map<int, std::vector<json>> embedding_reqs; // keyed by req_id
+@@ -634,10 +635,46 @@ struct wllama_context
      if (is_chat || is_asr)
      {
        std::vector<raw_buffer> dummy_files; // unused
@@ -88,11 +108,152 @@ index 820c27c..312e6e4 100644
            dummy_files,
            chat_session);
        body = std::move(body_parsed);
+@@ -1403,70 +1440,89 @@ struct wllama_context
+     PARSE_REQ(glue_msg_systemone_req);
+     glue_msg_systemone_res res;
+ 
++    const auto fail = [&](const std::string & message, error_type type) {
++      res.success.value = false;
++      res.error_json.value = safe_json_to_str(format_error_response(message, type));
++    };
+     if (decision.type == COMMON_DECISION_TYPE_NONE)
+     {
+-      throw app_exception("This model is not a decision model");
++      fail("This model is not a decision model", ERROR_TYPE_NOT_SUPPORTED);
++      return res;
+     }
+ 
+-    json body = json::parse(req.data_json.value);
+-    decision_request dreq;
+-    dreq.questions = decision.parse_questions(body, false);
+-    const auto &questions = dreq.questions;
+-    const size_t set_size = decision.set_size(questions);
+-
+-    std::vector<raw_buffer> files;
+-    const json state = decision.prepare_state(decision.parse_state(body, files));
+-    if (!files.empty())
++    try
+     {
+-      throw app_exception("Image input is not supported for systemone");
+-    }
++      json body = json::parse(req.data_json.value);
++      decision_request dreq;
++      dreq.questions = decision.parse_questions(body, meta->has_inp_audio);
++      const auto &questions = dreq.questions;
++      const size_t set_size = decision.set_size(questions);
+ 
+-    auto rd = std::make_unique<server_response_reader>(ctx_server.get_response_reader());
++      std::vector<raw_buffer> files;
++      const json state = decision.prepare_state(decision.parse_state(body, files));
++      dreq.has_media = !files.empty();
++      if (dreq.has_media && (!decision.can_use_images() || !meta->has_inp_image))
++      {
++        fail("This server does not support image input for decisions. For a model that supports it, start it with `--mmproj`", ERROR_TYPE_NOT_SUPPORTED);
++        return res;
++      }
+ 
+-    // same as post_systemone of llama-server: one task per variant of each question, or one task for all the questions, or per packed set
+-    dreq.is_packed = decision.is_joint() || set_size > 0;
+-    std::vector<server_task> tasks;
+-    if (decision.is_joint())
+-    {
+-      server_task task = server_task(SERVER_TASK_TYPE_DECISION);
+-      task.id = rd->get_new_id();
+-      decision.fill_task_joint(state, questions, files, nullptr, mtmd_helper_init_opt_default(), task);
+-      tasks.push_back(std::move(task));
+-    }
+-    else if (set_size > 0)
+-    {
+-      for (size_t i = 0; i < questions.size(); i += set_size)
++      auto rd = std::make_unique<server_response_reader>(ctx_server.get_response_reader());
++
++      // same as post_systemone of llama-server: one task per variant of each question, or one task for all the questions, or per packed set
++      dreq.is_packed = decision.is_joint() || set_size > 0;
++      std::vector<server_task> tasks;
++      if (decision.is_joint())
+       {
+-        const std::vector<server_decision_question> set(questions.begin() + i, questions.begin() + std::min(questions.size(), i + set_size));
+         server_task task = server_task(SERVER_TASK_TYPE_DECISION);
+         task.id = rd->get_new_id();
+-        decision.fill_task_set(state, set, files, nullptr, mtmd_helper_init_opt_default(), task);
++        decision.fill_task_joint(state, questions, files, shared_mctx, mtmd_helper_init_opt_default(), task);
+         tasks.push_back(std::move(task));
+       }
+-    }
+-    else
+-    {
+-      for (const auto &question : questions)
++      else if (set_size > 0)
+       {
+-        for (size_t variant = 0; variant < decision.n_variants(question); variant++)
++        for (size_t i = 0; i < questions.size(); i += set_size)
+         {
++          const std::vector<server_decision_question> set(questions.begin() + i, questions.begin() + std::min(questions.size(), i + set_size));
+           server_task task = server_task(SERVER_TASK_TYPE_DECISION);
+           task.id = rd->get_new_id();
+-          decision.fill_task(state, questions, question, variant, files, nullptr, mtmd_helper_init_opt_default(), task);
++          decision.fill_task_set(state, set, files, shared_mctx, mtmd_helper_init_opt_default(), task);
+           tasks.push_back(std::move(task));
+         }
+       }
++      else
++      {
++        for (const auto &question : questions)
++        {
++          for (size_t variant = 0; variant < decision.n_variants(question); variant++)
++          {
++            server_task task = server_task(SERVER_TASK_TYPE_DECISION);
++            task.id = rd->get_new_id();
++            decision.fill_task(state, questions, question, variant, files, shared_mctx, mtmd_helper_init_opt_default(), task);
++            tasks.push_back(std::move(task));
++          }
++        }
++      }
++      dreq.scores.resize(tasks.size());
++      if (decision.can_share_prompt())
++      {
++        tasks = server_decision_group_tasks(std::move(tasks), params.n_parallel);
++      }
++      rd->post_tasks(std::move(tasks));
++
++      res.success.value = true;
++      res.req_id.value = register_reader(std::move(rd));
++      decision_reqs.emplace(res.req_id.value, std::move(dreq));
++      return res;
+     }
+-    dreq.scores.resize(tasks.size());
+-    if (decision.can_share_prompt())
++    catch (const std::invalid_argument &e)
+     {
+-      tasks = server_decision_group_tasks(std::move(tasks), params.n_parallel);
++      fail(e.what(), ERROR_TYPE_INVALID_REQUEST);
++    }
++    catch (const common_json_error &e)
++    {
++      fail(e.what(), ERROR_TYPE_INVALID_REQUEST);
+     }
+-    rd->post_tasks(std::move(tasks));
+-
+-    res.success.value = true;
+-    res.req_id.value = register_reader(std::move(rd));
+-    decision_reqs.emplace(res.req_id.value, std::move(dreq));
+     return res;
+   }
+ 
+@@ -1915,7 +1971,7 @@ struct wllama_context
+       {
+         scores.push_back(dreq.scores[i_result++]);
+       }
+-      answers[question.id] = decision.format_answer(question, scores);
++      answers[question.id] = decision.format_answer(question, scores, dreq.has_media);
+     }
+     return json{
+         {"model", meta->model_name},
 diff --git a/cpp/wllama.cpp b/cpp/wllama.cpp
-index 57fced5..0e43124 100644
+index 0474154..02f6657 100644
 --- a/cpp/wllama.cpp
 +++ b/cpp/wllama.cpp
-@@ -24,7 +24,7 @@
+@@ -32,7 +32,7 @@ std::string common_get_default_local_path(const std::string & url) {
  #define WLLAMA_ACTION(name)                \
    else if (action == #name)                \
    {                                        \
@@ -101,30 +262,27 @@ index 57fced5..0e43124 100644
      res.handler.serialize(output_buffer);  \
    }
  
-@@ -60,7 +60,10 @@ static void printStr(ggml_log_level level, const char *text)
+@@ -68,7 +68,8 @@ static void printStr(ggml_log_level level, const char *text)
  }
  
  static glue_outbuf output_buffer;
 -static wllama_context app;
-+// fllama: a pointer, so wllama_unload can free the model and make a new
-+// context in the same worker (a new worker cannot always get WebAssembly
-+// memory on iOS Safari).
-+static wllama_context *app = new wllama_context();
++// fllama: replace the context on unload to reuse Wasm memory on iOS Safari.
++static auto app = std::make_unique<wllama_context>();
  
  static std::vector<char> input_buffer;
  // second argument is dummy
-@@ -140,6 +143,23 @@ extern "C" const char *wllama_action(const char *name, const char *req_raw)
-   }
+@@ -172,6 +173,22 @@ extern "C" void wllama_rpc_serve(int port, int n_threads)
+   ggml_backend_rpc_start_server(endpoint.c_str(), nullptr, n_threads, 1, &dev);
  }
  
-+// fllama: frees the model, its context, KV cache and mmproj. The files stay
-+// in the worker's file system; a load action can follow.
++// fllama: free the model/context before replacing the worker's input files.
 +extern "C" const char *wllama_unload()
 +{
 +  try
 +  {
-+    delete app;
-+    app = new wllama_context();
++    app.reset();
++    app = std::make_unique<wllama_context>();
 +    return "{\"success\":true}";
 +  }
 +  catch (std::exception &e)
@@ -137,160 +295,325 @@ index 57fced5..0e43124 100644
  extern "C" const char *wllama_exit()
  {
    try
-diff --git a/src/utils.ts b/src/utils.ts
-index fe45ec4..258a7b1 100644
---- a/src/utils.ts
-+++ b/src/utils.ts
-@@ -274,15 +274,12 @@ export const isSupportWebGPU = () => {
-  * @returns true if browser support WASM Memory64
-  */
- export const isSupportMem64 = (): boolean => {
--  try {
--    new WebAssembly.Memory({
--      address: 'i64',
--      initial: 1n, // 1 page (64 KiB)
--    } as any);
--    return true;
--  } catch {
--    return false;
--  }
-+  // fllama: a module with one 64-bit memory. WebKit accepts
-+  // new WebAssembly.Memory({ address: 'i64' }) and makes a 32-bit memory, and
-+  // then cannot compile a Memory64 module.
-+  return WebAssembly.validate(
-+    new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 5, 3, 1, 4, 0])
-+  );
- };
+diff --git a/src/glue/messages.ts b/src/glue/messages.ts
+index 8abb849..e425d33 100644
+--- a/src/glue/messages.ts
++++ b/src/glue/messages.ts
+@@ -686,6 +686,11 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
+         "name": "success",
+         "isNullable": false
+       },
++      {
++        "type": "str",
++        "name": "error_json",
++        "isNullable": false
++      },
+       {
+         "type": "int",
+         "name": "req_id",
+@@ -1194,6 +1199,7 @@ export interface GlueMsgSystemoneReq {
+ export interface GlueMsgSystemoneRes {
+   _name: "sys1_res";
+   success: boolean;
++  error_json: string;
+   req_id: number;
+ }
  
- /**
+diff --git a/src/types/oai-compat.ts b/src/types/oai-compat.ts
+index 39cb417..02ede43 100644
+--- a/src/types/oai-compat.ts
++++ b/src/types/oai-compat.ts
+@@ -401,6 +401,8 @@ export type SystemOneQuestion =
+ 
+ export interface SystemOneParams {
+   state: any;
++  files?: string[];
++  images?: string[];
+   questions: Record<string, SystemOneQuestion>;
+ }
+ 
 diff --git a/src/wllama.ts b/src/wllama.ts
-index a6b099e..6a2fea7 100644
+index 459caa2..dffff1f 100644
 --- a/src/wllama.ts
 +++ b/src/wllama.ts
-@@ -636,7 +636,11 @@ export class Wllama {
+@@ -351,6 +351,8 @@ export class WllamaRealtimeSession {
+ }
+ 
+ export class Wllama {
++  /** fllama: preserve the Wasm allocation on a compatible reload. */
++  reuseWorker = false;
+   // The CacheManager and ModelManager are singleton, can be accessed by user
+   public cacheManager: CacheManager;
+   public modelManager: ModelManager;
+@@ -674,15 +676,20 @@ export class Wllama {
+       );
      }
  
-     if (this.proxy) {
--      throw new WllamaError('Module is already initialized', 'load_error');
-+      if (!this.reuseWorker) {
-+        throw new WllamaError('Module is already initialized', 'load_error');
-+      }
-+      await this.loadInSameWorker(blobs, params);
-+      return;
+-    if (this.proxy) {
++    if (this.proxy && !this.reuseWorker) {
+       throw new WllamaError('Module is already initialized', 'load_error');
      }
++    await this.loadPreparedModel(blobs, params);
++  }
++
++  private async loadPreparedModel(blobs: Blob[], params: LoadModelParams): Promise<void> {
++    const exitCountAtStart = this.exitCount;
++    const oldProxy = this.proxy;
      // detect if we can use multi-thread and webgpu
      const supportMultiThread = await isSupportMultiThread();
-@@ -675,17 +679,65 @@ export class Wllama {
-     }
-     await this.checkWasmVersion(startResult.version);
+     const hwConccurency = Math.floor((navigator.hardwareConcurrency || 1) / 2);
+     const nbThreads = params.n_threads ?? hwConccurency;
+-    this.nbThreads = nbThreads;
+-    this.useMultiThread = supportMultiThread && nbThreads > 1;
++    const useMultiThread = supportMultiThread && nbThreads > 1;
  
-+    this.loadedModelFiles = modelFiles;
-+    this.loadedCompat = workerResources.compat;
-+    this.loadedNoWebGPU = !!workerResources.noWebGPU;
-+    this.loadedLogLevel = logLevel;
-+    await this.loadInWorker(modelFiles, params, logLevel, workerResources.compat);
-+  }
-+
-+  /**
-+   * fllama: when true, loadModel() on an instance that has a worker frees the
-+   * model and its context and loads in the same worker, instead of failing.
-+   * The worker keeps its WebAssembly memory, so the load reuses it (on iOS
-+   * Safari, a new worker cannot always get the memory of an ended one).
-+   * Needs async file reads; refuses, before unloading, more threads, another
-+   * build, or another WebGPU setup (n_gpu_layers 0 or not).
-+   */
-+  reuseWorker: boolean = false;
-+  private loadedModelFiles: Awaited<ReturnType<typeof prepareBlobs>> | null = null;
-+  private loadedCompat: boolean = false;
-+  private loadedNoWebGPU: boolean = false;
-+  private loadedLogLevel: any = undefined;
-+
-+  private async loadInSameWorker(blobs: Blob[], params: LoadModelParams): Promise<void> {
-+    if (this.getWorkerResources().compat !== this.loadedCompat) {
-+      throw new WllamaError('A new worker would use another build', 'load_error');
+     // before creating the worker, so a bad file does not leave this instance half initialized
+     // a copy: the caller can change it while the files are prepared
+@@ -734,14 +741,29 @@ export class Wllama {
+         'WebGPU on Firefox is slower than on other browsers, due to a Firefox bug (https://bugzilla.mozilla.org/show_bug.cgi?id=1870699). wllama works around most of it, see https://github.com/ngxson/wllama/issues/296'
+       );
+     }
+-    const nRpcWorkers = this.pickRpcWorkers(params, workerResources);
++    if (this.exitCount !== exitCountAtStart || this.proxy !== oldProxy) {
++      throw new WllamaError('The worker changed while the model was loading', 'load_error');
 +    }
-+    if ((params.n_gpu_layers === 0) !== this.loadedNoWebGPU) {
-+      throw new WllamaError('A new worker would set up WebGPU differently', 'load_error');
++    const nRpcWorkers = this.pickRpcWorkers(params, workerResources, useMultiThread);
+     const rpcMemMax =
+       params.rpc_workers === undefined
+-        ? this.autoRpcMemMax(modelFiles.llm, workerResources)
++        ? this.autoRpcMemMax(modelFiles.llm, workerResources, useMultiThread)
+         : undefined;
+-    this.proxy = new ProxyToWorker(
++    // Reused workers cannot change build, GPU initialization, thread pool, or
++    // RPC channels. The fllama bridge falls back to a new worker in that case.
++    if (oldProxy && (this.rpcWorkers.length || nRpcWorkers ||
++        oldProxy.resources.compat !== workerResources.compat ||
++        oldProxy.resources.noWebGPU !== workerResources.noWebGPU ||
++        oldProxy.multiThread !== useMultiThread ||
++        (useMultiThread && nbThreads > oldProxy.nbThread) ||
++        !oldProxy.useAsyncFile)) {
++      throw new WllamaError('These settings require a new worker', 'load_error');
 +    }
-+    const nbThreads = params.n_threads ?? this.nbThreads;
-+    if (nbThreads > this.nbThreads) {
-+      throw new WllamaError('The same worker cannot have more threads', 'load_error');
-+    }
-+    const modelFiles = await prepareBlobs(blobs);
-+    // First: it fails, with the model still loaded, without async file reads.
-+    await this.proxy.replaceFiles(modelFiles.all);
-+    this.loadedContextInfo = null as any;
-+    await this.proxy.wllamaUnload();
 +    this.nbThreads = nbThreads;
-+    this.loadedModelFiles = modelFiles;
-+    await this.loadInWorker(modelFiles, params, this.loadedLogLevel, this.loadedCompat);
-+  }
-+
-+  private async loadInWorker(
-+    modelFiles: Awaited<ReturnType<typeof prepareBlobs>>,
-+    params: LoadModelParams,
-+    logLevel: any,
-+    compat: boolean
-+  ): Promise<void> {
-     // load the model
-     this.logger().debug('Loading model...');
-     const loadResult: GlueMsgLoadRes = await this.proxy.wllamaAction('load', {
-       _name: 'load_req',
-       log_level: logLevel,
-       // if async read is not supported, use mmap; refer to README-dev.md for more details
--      use_mmap: !canUseAsyncFileRead(workerResources.compat),
-+      use_mmap: !canUseAsyncFileRead(compat),
-       use_mlock: false,
-       n_gpu_layers: params.n_gpu_layers ?? 99999,
-       n_ctx: params.n_ctx ?? 1024,
--      n_threads: this.useMultiThread ? nbThreads : 1,
-+      n_threads: this.useMultiThread ? this.nbThreads : 1,
-       n_ctx_auto: false, // not supported for now
-       mmproj_path: modelFiles.mmproj
-         ? `/models/${MMPROJ_FILE_NAME}`
-@@ -1190,6 +1242,7 @@ export class Wllama {
-   async exit(): Promise<void> {
-     await this.proxy?.wllamaExit();
-     this.proxy = null as any;
-+    this.loadedModelFiles = null;
-   }
++    this.useMultiThread = useMultiThread;
++    this.proxy = oldProxy ?? new ProxyToWorker(
+       workerResources,
+-      this.useMultiThread ? nbThreads : 0, // 0 means disable pthread
++      useMultiThread ? nbThreads : 0, // 0 means disable pthread
+       this.config.suppressNativeLog ?? false,
+       this.logger()
+     );
+@@ -764,22 +786,24 @@ export class Wllama {
+     };
+     let loadResult: GlueMsgLoadRes;
+     try {
+-      const rpc = await this.startRpcWorkers(
+-        nRpcWorkers,
+-        workerResources,
+-        ownRpcWorkers
+-      );
+-      await proxy.moduleInit(modelFiles.all, rpc);
++      delete this.metadata;
++      this.loadedContextInfo = null as any;
++      if (oldProxy) {
++        await proxy.wllamaUnload();
++        await proxy.replaceFiles(modelFiles.all);
++      } else {
++        const rpc = await this.startRpcWorkers(nRpcWorkers, workerResources, ownRpcWorkers);
++        await proxy.moduleInit(modelFiles.all, rpc);
+ 
+-      // run it
+-      this.logger().debug('Calling wllamaStart...');
+-      const startResult: any = await proxy.wllamaStart();
+-      if (!startResult.success) {
+-        throw new WllamaError(
+-          `Error while calling start function, result = ${startResult}`
+-        );
++        this.logger().debug('Calling wllamaStart...');
++        const startResult: any = await proxy.wllamaStart();
++        if (!startResult.success) {
++          throw new WllamaError(
++            `Error while calling start function, result = ${startResult}`
++          );
++        }
++        await this.checkWasmVersion(startResult.version);
+       }
+-      await this.checkWasmVersion(startResult.version);
+ 
+       // load the model
+       this.logger().debug('Loading model...');
+@@ -891,7 +915,7 @@ export class Wllama {
+           'load_error'
+         );
+       }
+-      return await this.loadModel(blobs, {
++      return await this.loadPreparedModel(blobs, {
+         ...params,
+         rpc_workers: loadResult.n_rpc_workers,
+       });
+@@ -1048,12 +1072,16 @@ export class Wllama {
  
    /**
+    * Answer typed questions about a state, using a decision model (TypeSafe-compatible System One API).
+-   * Image input is not supported yet.
+-   * @param options The state and the questions
++   * @param options The state, questions, and optional media data URLs
++   * @param abortSignal Cancels the decision request
+    * @returns The answer of each question
+    */
+-  async createSystemOne(options: SystemOneParams): Promise<SystemOneResponse> {
++  async createSystemOne(
++    options: SystemOneParams,
++    abortSignal?: AbortSignal
++  ): Promise<SystemOneResponse> {
+     this.checkModelLoaded();
++    if (abortSignal?.aborted) throw new WllamaAbortError();
+ 
+     const result = await this.proxy.wllamaAction<GlueMsgSystemoneRes>(
+       'systemone',
+@@ -1064,15 +1092,22 @@ export class Wllama {
+     );
+ 
+     if (!result.success) {
+-      throw new WllamaError(
+-        'Model failed to start systemone',
+-        'inference_error'
+-      );
++      if (abortSignal?.aborted) throw new WllamaAbortError();
++      throw this.systemOneError(result.error_json);
+     }
+ 
+     return await this.getSingleResult<SystemOneResponse>(
+       result.req_id,
+-      'systemone'
++      'systemone',
++      abortSignal
++    );
++  }
++
++  private systemOneError(jsonString: string): WllamaError {
++    const data = this.jsonDecode(jsonString);
++    return Object.assign(
++      new WllamaError(data.message || 'Unknown systemone error', 'inference_error'),
++      { serverErrorType: data.type }
+     );
+   }
+ 
+@@ -1457,6 +1492,8 @@ export class Wllama {
+     const proxy = this.proxy;
+     const rpcWorkers = this.rpcWorkers;
+     this.proxy = null as any;
++    delete this.metadata;
++    this.loadedContextInfo = null as any;
+     this.rpcWorkers = [];
+     await proxy?.wllamaExit();
+     // rpc workers are blocked in the wasm, terminate them
+@@ -1472,7 +1509,8 @@ export class Wllama {
+ 
+   private pickRpcWorkers(
+     params: LoadModelParams,
+-    resources: WllamaWorkerResources
++    resources: WllamaWorkerResources,
++    useMultiThread: boolean
+   ): number {
+     if (params.rpc_workers !== undefined) {
+       const n = params.rpc_workers;
+@@ -1482,7 +1520,7 @@ export class Wllama {
+           'load_error'
+         );
+       }
+-      if (params.rpc_workers > 0 && !this.useMultiThread) {
++      if (params.rpc_workers > 0 && !useMultiThread) {
+         throw new WllamaError(
+           'rpc_workers needs multi-thread, see the Cross-Origin headers in README',
+           'load_error'
+@@ -1500,7 +1538,8 @@ export class Wllama {
+   // undefined: no measure. It reads the metadata one more time, so small files skip it
+   private autoRpcMemMax(
+     files: { blob: Blob }[],
+-    resources: WllamaWorkerResources
++    resources: WllamaWorkerResources,
++    useMultiThread: boolean
+   ): number | undefined {
+     const size = files.reduce((sum, f) => sum + f.blob.size, 0);
+     if (size < RPC_CONFIG.autoMinSize) return undefined;
+@@ -1511,7 +1550,7 @@ export class Wllama {
+       return undefined;
+     }
+     // the main wasm does the rpc I/O in its own threads
+-    return this.useMultiThread
++    return useMultiThread
+       ? RPC_CONFIG.mainMemMax
+       : RPC_CONFIG.singleThreadMemMax;
+   }
+@@ -1814,18 +1853,26 @@ export class Wllama {
+     }
+   }
+ 
+-  private async getSingleResult<T>(reqId: number, task: string): Promise<T> {
++  private async getSingleResult<T>(
++    reqId: number,
++    task: string,
++    abortSignal?: AbortSignal
++  ): Promise<T> {
+     let completed = false;
+     try {
+       while (true) {
++        if (abortSignal?.aborted) throw new WllamaAbortError();
+         const chunk = await this.proxy.wllamaAction<GlueMsgGetResultRes>(
+           'get_result',
+           { _name: 'gres_req', req_id: reqId }
+         );
+ 
++        completed = !chunk.has_more;
++        if (abortSignal?.aborted) throw new WllamaAbortError();
+         const jsonString = chunk.data_json;
+         if (jsonString && jsonString.length > 0) {
+           if (chunk.is_error) {
++            if (task === 'systemone') throw this.systemOneError(jsonString);
+             const jsonData = this.jsonDecode(jsonString);
+             throw new WllamaError(
+               jsonData.message || `Unknown ${task} error`,
+@@ -1836,10 +1883,7 @@ export class Wllama {
+           return this.jsonDecode(jsonString);
+         }
+ 
+-        if (!chunk.has_more) {
+-          completed = true;
+-          break;
+-        }
++        if (completed) break;
+       }
+ 
+       throw new WllamaError(`No ${task} result received`, 'inference_error');
 diff --git a/src/worker.ts b/src/worker.ts
-index a8ffbb9..26b6893 100644
+index 36047b9..ddac3f3 100644
 --- a/src/worker.ts
 +++ b/src/worker.ts
-@@ -43,6 +43,7 @@ interface TaskParam {
+@@ -57,6 +57,7 @@ interface TaskParam {
      | 'wllama.start'
      | 'wllama.action'
      | 'wllama.exit'
 +    | 'wllama.unload'
-     | 'wllama.debug';
+     | 'wllama.debug'
+     | 'rpc.serve';
    args: any[];
-   callbackId: number;
-@@ -224,6 +225,34 @@ export class ProxyToWorker {
+@@ -312,6 +313,27 @@ export class ProxyToWorker {
      return parsedResult as T;
    }
  
-+  /**
-+   * fllama: puts these files in the worker's file system, in place of files
-+   * of the same name. Only with async file reads: the worker reads them from
-+   * the blobs, so no heap memory is taken.
-+   */
++  /** fllama: only for a worker using async file reads (nothing on heap). */
 +  async replaceFiles(files: { name: string; blob: Blob }[]): Promise<void> {
 +    if (!this.useAsyncFile) {
 +      throw new Error('replaceFiles needs async file reads');
 +    }
++    this.fileBlobs.clear();
 +    for (const file of files) {
-+      await this.fileAlloc(file.name, file.blob.size, false);
++      await this.fileAlloc(file.name, file.blob.size, false, getOPFSPath(file.blob));
 +      this.fileBlobs.set(file.name, file.blob);
 +    }
 +  }
 +
-+  /**
-+   * fllama: frees the model and its context in the worker; the worker, its
-+   * memory and its files stay. A load action can follow.
-+   */
 +  async wllamaUnload(): Promise<void> {
 +    const result = await this.pushTask({
 +      verb: 'wllama.unload',
@@ -303,16 +626,7 @@ index a8ffbb9..26b6893 100644
    async wllamaExit(): Promise<void> {
      if (this.worker) {
        // we don't actually need to send exit
-@@ -397,13 +426,15 @@ export class ProxyToWorker {
-         this.logger.error(originalErr);
-       }
-       let stack = '';
--      let newMsg = message.replace(
-+      // fllama: Emscripten passes an Error, not a string, when the wasm does
-+      // not compile. Without String(), this throws and no task is rejected.
-+      let newMsg = String(message ?? '').replace(
-         'Build with -sASSERTIONS for more info.',
-         ''
+@@ -502,7 +524,7 @@ export class ProxyToWorker {
        );
        if (signalType === 'abort') {
          newMsg = `(ABORT) ${newMsg}`;
@@ -322,7 +636,7 @@ index a8ffbb9..26b6893 100644
          stack = rawStack;
        }
 diff --git a/src/workers-code/llama-cpp.js b/src/workers-code/llama-cpp.js
-index d0792b5..60a3fe2 100644
+index 0e579ac..c511b15 100644
 --- a/src/workers-code/llama-cpp.js
 +++ b/src/workers-code/llama-cpp.js
 @@ -3,6 +3,7 @@ let wllamaMalloc;
@@ -331,65 +645,32 @@ index d0792b5..60a3fe2 100644
  let wllamaExit;
 +let wllamaUnload;
  let wllamaDebug;
+ let wllamaRpcServe;
  
- let Module = null;
-@@ -41,11 +42,14 @@ const toSizeT = (num) => {
+@@ -37,10 +38,12 @@ const getHeapU8 = () => {
  // Get module config that forwards stdout/err to main thread
- const getWModuleConfig = (_argMainScriptBlob) => {
+ const getWModuleConfig = (_argMainScriptBlob, wasmModule) => {
    var pathConfig = RUN_OPTIONS.pathConfig;
 -  var pthreadPoolSize = RUN_OPTIONS.nbThread;
-+  // fllama: the text model and the mtmd image encoder each start
-+  // n_threads - 1 pthreads. In Safari, a pthread beyond the pool never
-+  // starts, and image encoding waits forever. So the pool has room for both.
++  // fllama: the text model and mtmd can each use n_threads - 1 pthreads;
++  // on Safari a pthread beyond the initial pool may never start.
 +  var pthreadPoolSize = RUN_OPTIONS.nbThread * 2;
    var argMainScriptBlob = _argMainScriptBlob;
  
-   isCompat = RUN_OPTIONS.compat;
 -  hasMultithread = pthreadPoolSize > 1;
 +  hasMultithread = RUN_OPTIONS.nbThread > 1;
  
    msg({
      verb: 'console.debug',
-@@ -461,6 +465,8 @@ onmessage = async (e) => {
+@@ -585,6 +588,7 @@ onmessage = async (e) => {
            true
          );
          wllamaExit = callWrapper('wllama_exit', 'string', []);
-+        // async: freeing a WebGPU model suspends under JSPI.
 +        wllamaUnload = callWrapper('wllama_unload', 'string', [], true);
          wllamaDebug = callWrapper('wllama_debug', 'string', []);
-         msg({ callbackId, result: null });
-       };
-@@ -476,16 +482,19 @@ onmessage = async (e) => {
-     const argSize = args[1];
-     const argAllocBuffer = args[2];
-     try {
--      // create blank file
--      const emptyBuffer = new ArrayBuffer(0);
--      Module['FS_createDataFile'](
--        '/models',
--        argFilename,
--        emptyBuffer,
--        true,
--        true,
--        true
--      );
-+      // create blank file (fllama: a later load in the same worker can have
-+      // a file of the same name)
-+      if (!Module['FS'].analyzePath('/models/' + argFilename).exists) {
-+        const emptyBuffer = new ArrayBuffer(0);
-+        Module['FS_createDataFile'](
-+          '/models',
-+          argFilename,
-+          emptyBuffer,
-+          true,
-+          true,
-+          true
-+        );
-+      }
-       // alloc data on heap
-       const fileId = heapfsAlloc(argFilename, argSize, argAllocBuffer);
-       msg({ callbackId, result: { fileId } });
-@@ -525,6 +534,18 @@ onmessage = async (e) => {
+         wllamaRpcServe = Module.cwrap(
+           'wllama_rpc_serve',
+@@ -674,6 +678,28 @@ onmessage = async (e) => {
      return;
    }
  
@@ -397,6 +678,16 @@ index d0792b5..60a3fe2 100644
 +    await runWasmCall(callbackId, async () => {
 +      try {
 +        const result = await wllamaUnload();
++        if (JSON.parse(result).success) {
++          opfsCloseAll();
++          readAhead = null;
++          for (const name of Object.keys(fsNameToFile)) {
++            Module['FS'].unlink('/models/' + name);
++            delete fsIdToFile[fsNameToFile[name].id];
++            delete fsNameToFile[name];
++            delete opfsFiles[name];
++          }
++        }
 +        msg({ callbackId, result });
 +      } catch (err) {
 +        handleError(err);

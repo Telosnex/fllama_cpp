@@ -46,7 +46,7 @@ src/llama.cpp/tools/rpc/
 src/llama.cpp/tools/tokenize/
 src/llama.cpp/tools/tts/
 src/llama.cpp/tools/tuning/
-src/llama.cpp/tools/ui/
+src/llama.cpp/ui/
 src/llama.cpp/*.py
 # GPU backends the hook never enables (it uses CPU, Metal, Vulkan and BLAS;
 # CUDA comes as a prebuilt pack, but ggml-cuda/ stays: the CUDA pack key

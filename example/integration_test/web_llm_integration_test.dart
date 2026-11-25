@@ -82,7 +82,7 @@ void main() {
     expect(
       info!['build'],
       browser.expectedWllamaBuild,
-      reason: 'jspi=${browser.jspi}, memory64=${browser.memory64}, '
+      reason: 'jspi=${browser.jspi}, relaxedSimd=${browser.relaxedSimd}, '
           'firefox=${browser.firefox}',
     );
     expect(
@@ -321,6 +321,25 @@ void main() {
         report['compat_solid_red.runtime'] = info;
         expect(info?['build'], 'compat');
         if (threads > 1) expect(info?['numThreads'], threads);
+
+        final reload = await chat(
+          'compat_reload',
+          _request(
+            [Message(Role.user, 'hi')],
+            mmproj: true,
+            maxTokens: 16,
+            contextSize: 1536,
+            enableThinking: false,
+          ),
+        );
+        reload.expectOk();
+        expect(reload.content, isNotEmpty);
+        final after = _runtimeInfo();
+        report['compat_reload.runtime'] = after;
+        expect(after?['build'], 'compat');
+        expect(info?['workerId'], isA<num>());
+        expect(after?['workerId'], info?['workerId'],
+            reason: 'A compatible reload should reuse Wasm memory.');
       },
       skip: browser.firefox,
       timeout: _timeout,
@@ -575,7 +594,7 @@ class _Browser {
   final int hardwareConcurrency;
   final bool crossOriginIsolated;
   final bool jspi;
-  final bool memory64;
+  final bool relaxedSimd;
   final bool webGpu;
 
   _Browser({
@@ -583,19 +602,20 @@ class _Browser {
     required this.hardwareConcurrency,
     required this.crossOriginIsolated,
     required this.jspi,
-    required this.memory64,
+    required this.relaxedSimd,
     required this.webGpu,
   });
 
   factory _Browser.read() {
     final wasm = globalContext['WebAssembly'] as JSObject;
-    // A module with one 64-bit memory: valid only with Memory64.
-    final memory64 = wasm
+    // A function using i8x16.relaxed_swizzle, as probed by wllama v4.
+    final relaxedSimd = wasm
         .callMethod<JSBoolean>(
           'validate'.toJS,
           Uint8List.fromList([
-            0x00, 0x61, 0x73, 0x6d, 0x01, 0, 0, 0, //
-            0x05, 0x03, 0x01, 0x04, 0x01,
+            0, 97, 115, 109, 1, 0, 0, 0, //
+            1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 15, //
+            1, 13, 0, 65, 0, 253, 15, 65, 0, 253, 15, 253, 128, 2, 11,
           ]).toJS,
         )
         .toDart;
@@ -607,7 +627,7 @@ class _Browser {
       crossOriginIsolated:
           (globalContext['crossOriginIsolated'] as JSBoolean?)?.toDart ?? false,
       jspi: wasm.has('Suspending'),
-      memory64: memory64,
+      relaxedSimd: relaxedSimd,
       webGpu: navigator.has('gpu'),
     );
   }
@@ -616,10 +636,9 @@ class _Browser {
 
   bool get firefox => userAgent.contains('Firefox/');
 
-  /// wllama uses its compat build when JSPI or Memory64 is missing, and
-  /// never on Firefox.
+  /// Firefox can run the main build without JSPI if it has relaxed SIMD.
   String get expectedWllamaBuild =>
-      firefox || (jspi && memory64) ? 'default' : 'compat';
+      relaxedSimd && (jspi || firefox) ? 'default' : 'compat';
 
   Map<String, Object?> toJson() => {
         'userAgent': userAgent,
@@ -627,7 +646,7 @@ class _Browser {
         'dartCompiler': dartCompiler,
         'crossOriginIsolated': crossOriginIsolated,
         'jspi': jspi,
-        'memory64': memory64,
+        'relaxedSimd': relaxedSimd,
         'webGpu': webGpu,
         'expectedWllamaBuild': expectedWllamaBuild,
       };
