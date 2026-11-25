@@ -337,7 +337,7 @@ void main() {
         final after = _runtimeInfo();
         report['compat_reload.runtime'] = after;
         expect(after?['build'], 'compat');
-        expect(info?['workerId'], isA<int>());
+        expect(info?['workerId'], isA<num>());
         expect(after?['workerId'], info?['workerId'],
             reason: 'A compatible reload should reuse Wasm memory.');
       },
