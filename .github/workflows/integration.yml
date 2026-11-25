@@ -195,8 +195,11 @@ jobs:
     steps: *desktop_steps
 
   # The wllama files of this commit: web_build/wllama.patch can be newer
-  # than the release. Built in the emsdk image of web_build/wllama.json, as
-  # kiln_release builds them; cached by the build inputs.
+  # than the release. If the kiln source key of this commit is the key of
+  # native_artifacts/web.json, the release has them: the job downloads them
+  # and checks their SHA-256, in about a minute. Else it builds them in the
+  # emsdk image of web_build/wllama.json, as kiln_release does, in about 17
+  # minutes. The files are cached by the build inputs.
   web-files:
     name: Web files
     runs-on: ubuntu-24.04
@@ -208,7 +211,7 @@ jobs:
         run: |
           apt-get update -qq
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-            ca-certificates curl git unzip xz-utils > /dev/null
+            ca-certificates curl git jq unzip xz-utils > /dev/null
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -216,13 +219,38 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/kiln_web
-          key: fllama-web-files-${{ hashFiles('web_build/**', 'patches/llama.cpp/**', 'tool/kiln/build_web.dart') }}
+          key: fllama-web-files-v2-${{ hashFiles('web_build/**', 'patches/llama.cpp/**', 'tool/kiln/build_web.dart') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: Telosnex/telosnex_ci_tools/actions/setup-flutter@0ab334b66d7bb8ff0f436b8e9739eb014ab35b79 # v0.5.24
-      - name: Build (tool/kiln/build_web.dart)
+      - name: Released files of this commit
+        id: released
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           git config --global --add safe.directory '*'
+          flutter pub get --no-example > /dev/null
+          key=$(dart run kiln:key | tail -n 1)
+          released=$(jq -r .sourceKey native_artifacts/web.json)
+          echo "Source key: $key. web.json: $released."
+          if [[ -z "$key" || "$key" != "$released" ]]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          out="$RUNNER_TEMP/kiln_web"
+          jq -c '.files[] | select(.source == "release")' native_artifacts/web.json |
+            while read -r file; do
+              name=$(jq -r .name <<< "$file")
+              mkdir -p "$out/$(dirname "$name")"
+              curl -fsSL --retry 3 "$(jq -r .url <<< "$file")" -o "$out/$name.gz"
+              echo "$(jq -r .downloadSha256 <<< "$file")  $out/$name.gz" | sha256sum -c -
+              gunzip -f "$out/$name.gz"
+              echo "$(jq -r .sha256 <<< "$file")  $out/$name" | sha256sum -c -
+            done
+          echo "found=true" >> "$GITHUB_OUTPUT"
+      - name: Build (tool/kiln/build_web.dart)
+        if: >-
+          steps.cache.outputs.cache-hit != 'true' &&
+          steps.released.outputs.found != 'true'
+        run: |
           dart tool/kiln/build_web.dart --out "$RUNNER_TEMP/kiln_web" --work "$RUNNER_TEMP/kiln_web_work"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
