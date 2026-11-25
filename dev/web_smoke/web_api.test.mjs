@@ -35,12 +35,21 @@ test('the web bridge maps decisions and realtime', async (t) => {
             state.sessions.push(session);
             let close;
             const closed = new Promise(resolve => { close = resolve; });
+            let serverError;
             return {
                 async *events() {
                     yield { type: 'session.created', session: { type: 'transcription' } };
                     await closed;
+                    if (serverError) yield serverError;
                 },
-                async send(event) { session.sent.push(event); },
+                async send(event) {
+                    session.sent.push(event);
+                    if (event.type === 'end-from-server') {
+                        serverError = { type: 'error', error: { message: 'The conversation does not fit in the context.' } };
+                        close();
+                        throw new Error('Realtime session is closed');
+                    }
+                },
                 async close() { session.closed = true; close(); },
             };
         }
@@ -124,6 +133,19 @@ test('the web bridge maps decisions and realtime', async (t) => {
             assert.equal(events.length, 2);
             await waiting.response;
             assert.equal(state.loads.length, loads + 1);
+        });
+        await t.test('realtime delivers the terminal server error once', async () => {
+            const events = [];
+            const closed = new Promise(resolve => {
+                const handle = fllamaRealtimeOpenJs({ ...request }, null, text => {
+                    const event = JSON.parse(text);
+                    events.push(event);
+                    if (event.type === 'fllama.realtime.closed') resolve(event);
+                });
+                handle.send(JSON.stringify({ type: 'end-from-server' }));
+            });
+            assert.equal((await closed).reason, 'server');
+            assert.deepEqual(events.map(event => event.type), ['session.created', 'error', 'fllama.realtime.closed']);
         });
     } finally {
         delete globalThis.TestWllama;
