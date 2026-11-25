@@ -19,6 +19,7 @@ test('the web bridge maps decisions and realtime', async (t) => {
         async loadModelFromUrl(source, config) {
             if (source === 'missing') throw new Error('missing model');
             this.logger.warn('load log');
+            if (source?.url === 'slow') await new Promise(resolve => { state.finishLoad = resolve; });
             this.config = config;
             state.loads.push({ source, config });
         }
@@ -133,6 +134,24 @@ test('the web bridge maps decisions and realtime', async (t) => {
             assert.equal(events.length, 2);
             await waiting.response;
             assert.equal(state.loads.length, loads + 1);
+        });
+        await t.test('closing realtime does not wait for a shared load', async () => {
+            let eventCount = 0;
+            let handle;
+            const closed = new Promise(resolve => {
+                handle = fllamaRealtimeOpenJs({ ...request, modelPath: 'slow' }, null, text => {
+                    eventCount++;
+                    resolve(JSON.parse(text));
+                });
+            });
+            // Wait for the stub to block inside the model load.
+            await new Promise(resolve => setImmediate(resolve));
+            assert.equal(typeof state.finishLoad, 'function');
+            handle.close();
+            assert.deepEqual(await closed, { type: 'fllama.realtime.closed', reason: 'client' });
+            state.finishLoad();
+            await new Promise(resolve => setImmediate(resolve));
+            assert.equal(eventCount, 1);
         });
         await t.test('realtime delivers the terminal server error once', async () => {
             const events = [];
